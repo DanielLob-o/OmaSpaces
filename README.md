@@ -1,6 +1,6 @@
 # Omaspaces
 
-Workspace indicators for the [Omarchy](https://omarchy.org/) bar. Each pill shows the workspace number, an optional name, and a clickable icon for every open window. Right-click an icon to move or close its window, and save app layouts as profiles you can relaunch in one click.
+Workspace indicators for the [Omarchy](https://omarchy.org/) bar. Each pill shows the workspace number, an optional name, and the app icon of every open window. Right-click an icon to move or close its window, and save app layouts as profiles you can relaunch in one click.
 
 ![Omaspaces with the workspace profiles panel open](preview.png)
 
@@ -54,6 +54,7 @@ omarchy bar set lobo.omaspaces workspaceNames '{"1": "dev", "3": "chat"}' --json
 | Key | Default | Description |
 |---|---|---|
 | `showIcons` | `true` | Show an icon per open window |
+| `iconStyle` | `App` | `App` shows each app's own icon, `Glyph` shows Nerd Font glyphs |
 | `showNumbers` | `true` | Show workspace numbers. Empty workspaces always show theirs. |
 | `workspaceCount` | `5` | Workspaces always shown, even when empty |
 | `maxWorkspaceId` | `10` | Highest workspace shown once it has windows |
@@ -70,6 +71,8 @@ omarchy bar set lobo.omaspaces workspaceNames '{"1": "dev", "3": "chat"}' --json
 
 ## Icons
 
+Icons come from each app's desktop entry, the same icons your launcher shows. Apps without one fall back to a Nerd Font glyph. Set `iconStyle` to `Glyph` to use glyphs everywhere.
+
 ### Adding your own
 
 1. Right-click an app's icon and choose **Icon rule for this app…**. The pattern field is filled in with the app's window class. You can also right-click a workspace number and choose **Icon rules…**, then pick an open app from the dropdown or type a pattern.
@@ -78,7 +81,7 @@ omarchy bar set lobo.omaspaces workspaceNames '{"1": "dev", "3": "chat"}' --json
 
 ![Icon rules editor with Ghostty's class and a ghost glyph](custom_example.png)
 
-Your rules are listed under the form, with **✕** to remove one. They are checked before the built-in rules, so you can also use them to replace a built-in icon.
+Your rules are listed under the form, with **✕** to remove one. They are checked before the built-in glyph rules. In `App` style they apply to apps without their own icon.
 
 The pattern is a case-insensitive regular expression, so `firefox|zen` matches both browsers.
 

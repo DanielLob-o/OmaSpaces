@@ -42,6 +42,8 @@ BarWidget {
   readonly property var workspaceNames: root.objectSetting("workspaceNames")
   readonly property string iconOverridesPath: String(root.setting("iconOverridesPath", "~/.config/omarchy/omaspaces-icons.json"))
   readonly property string profilesPath: String(root.setting("profilesPath", "~/.config/omarchy/omaspaces-profiles.json"))
+  readonly property bool useAppIcons: String(root.setting("iconStyle", "App")).toLowerCase() !== "glyph"
+  readonly property int appIconSize: Math.round(Style.font.body * 1.4)
 
   readonly property color fgColor: root.bar ? root.bar.barForeground : Color.foreground
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
@@ -782,12 +784,34 @@ BarWidget {
               id: iconButton
               required property var modelData
 
+              readonly property string imageSource: root.useAppIcons ? root.appIconSource(root.toplevelClass(iconButton.modelData)) : ""
+              readonly property bool showImage: iconButton.imageSource !== "" && appIcon.status !== Image.Error
+
               bar: root.bar
-              text: root.iconForToplevel(iconButton.modelData)
+              text: iconButton.showImage ? "" : root.iconForToplevel(iconButton.modelData)
+              hasVisualContent: true
               fontSize: root.vertical ? Style.font.icon : Style.font.body
               horizontalMargin: root.iconMargin
               fixedHeight: root.vertical ? -1 : root.pillHeight
-              fixedWidth: root.vertical ? root.pillHeight : -1
+              fixedWidth: {
+                if (root.vertical) return root.pillHeight
+                return iconButton.showImage ? root.appIconSize + Math.round(Style.spaceReal(root.iconMargin)) * 2 : -1
+              }
+
+              Image {
+                id: appIcon
+                anchors.centerIn: parent
+                visible: iconButton.showImage && status === Image.Ready
+                source: iconButton.imageSource
+                width: root.appIconSize
+                height: root.appIconSize
+                sourceSize.width: root.appIconSize * 2
+                sourceSize.height: root.appIconSize * 2
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+                smooth: true
+                mipmap: true
+              }
               active: pill.focused && !pill.urgent
               activeColor: root.accentColor
               tooltipText: root.showTooltip ? root.toplevelTitle(iconButton.modelData) + "\nClick: focus · Right-click: move / close" : ""
@@ -926,14 +950,29 @@ BarWidget {
       anchors.fill: parent
       spacing: Style.spacing.sm
 
-      Text {
+      Row {
         width: parent.width
-        text: windowMenu.toplevel ? root.iconForToplevel(windowMenu.toplevel) + "  " + root.toplevelTitle(windowMenu.toplevel) : ""
-        color: root.fgColor
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
-        elide: Text.ElideRight
+        spacing: Style.space(8)
+
+        AppIcon {
+          id: windowMenuIcon
+          anchors.verticalCenter: parent.verticalCenter
+          widget: root
+          appClass: windowMenu.toplevel ? root.toplevelClass(windowMenu.toplevel) : ""
+          title: windowMenu.toplevel ? root.toplevelTitle(windowMenu.toplevel) : ""
+          size: Style.space(20)
+        }
+
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          width: parent.width - windowMenuIcon.width - parent.spacing
+          text: windowMenu.toplevel ? root.toplevelTitle(windowMenu.toplevel) : ""
+          color: root.fgColor
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.subtitle
+          font.bold: true
+          elide: Text.ElideRight
+        }
       }
 
       Text {

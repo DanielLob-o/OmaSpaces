@@ -32,7 +32,8 @@
       "showSpecial": true,
       "showProfiles": true,
       "workspaceNames": {},
-      "profilesPath": "~/.config/omarchy/omaspaces-profiles.json"
+      "profilesPath": "~/.config/omarchy/omaspaces-profiles.json",
+      "iconStyle": "App"
     },
     "schema": [
       {
@@ -41,6 +42,17 @@
         "label": "Show app icons",
         "description": "Show an icon for each open window.",
         "defaultValue": true
+      },
+      {
+        "key": "iconStyle",
+        "type": "enum",
+        "label": "Icon style",
+        "description": "App uses each app's own icon, falling back to a glyph. Glyph uses Nerd Font glyphs and your icon rules.",
+        "options": [
+          "App",
+          "Glyph"
+        ],
+        "defaultValue": "App"
       },
       {
         "key": "showNumbers",

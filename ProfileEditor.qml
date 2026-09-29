@@ -67,13 +67,23 @@ Rectangle {
           width: parent.width
           height: Math.max(appLabel.implicitHeight, removeButton.implicitHeight)
 
+          AppIcon {
+            id: appRowIcon
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            widget: editor.widget
+            appClass: appRow.modelData.class
+            size: Style.space(18)
+          }
+
           Text {
             id: appLabel
-            anchors.left: parent.left
+            anchors.left: appRowIcon.right
+            anchors.leftMargin: Style.space(8)
             anchors.right: stepper.left
             anchors.rightMargin: Style.spacing.controlGap
             anchors.verticalCenter: parent.verticalCenter
-            text: editor.widget.iconForClass(appRow.modelData.class) + "  " + editor.widget.displayClass(appRow.modelData.class)
+            text: editor.widget.displayClass(appRow.modelData.class)
             color: editor.foreground
             font.family: editor.fontFamily
             font.pixelSize: Style.font.body
