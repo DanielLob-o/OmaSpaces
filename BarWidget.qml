@@ -10,10 +10,7 @@ BarWidget {
   id: root
   moduleName: "lobo.omaspaces"
 
-  // Settings written via `omarchy bar set` without `--json` land in
-  // shell.json as plain strings (e.g. "false"), and QML's own string->bool
-  // coercion treats any non-empty string as true — so a bare `setting()`
-  // read would silently flip a boolean on.
+  // `omarchy bar set` without --json stores "false" as a string, which QML treats as true.
   function boolSetting(key, fallback) {
     var value = root.setting(key, fallback)
     if (typeof value === "boolean") return value
@@ -31,7 +28,6 @@ BarWidget {
     return value && typeof value === "object" && !Array.isArray(value) ? value : ({})
   }
 
-  // -------------------------------------------------------------- settings
   readonly property bool showIcons: root.boolSetting("showIcons", true)
   readonly property bool showNumbers: root.boolSetting("showNumbers", true)
   readonly property int workspaceCount: Util.clamp(Math.round(Number(root.setting("workspaceCount", 5))), 1, 10)
@@ -55,10 +51,7 @@ BarWidget {
     return Color.accent
   }
 
-  // --------------------------------------------------------- hyprland state
-  // Hyprland only pushes toplevel changes through IPC events; workspace
-  // membership (which pill a window's icon belongs to) is stale until we
-  // explicitly ask for a refresh. Bursts of events are coalesced.
+  // Hyprland doesn't push workspace membership changes, so refresh toplevels on window events.
   Timer {
     id: refreshToplevelsTimer
     interval: 40
@@ -77,8 +70,7 @@ BarWidget {
     }
   }
 
-  // Highlight the workspace shown on *this* bar's monitor, not whichever one
-  // has global focus, so each monitor's bar is correct on multi-head setups.
+  // This bar's monitor, not global focus, so each monitor highlights its own workspace.
   readonly property var barScreen: root.QsWindow.window ? root.QsWindow.window.screen : null
   readonly property var monitor: root.barScreen ? Hyprland.monitorFor(root.barScreen) : Hyprland.focusedMonitor
   readonly property int focusedId: {
@@ -98,8 +90,7 @@ BarWidget {
     return null
   }
 
-  // ObjectModel.values is a list-like sequence; copy it so slice/filter/sort
-  // are always real Array methods.
+  // ObjectModel.values isn't a real Array.
   function toArray(list) {
     return list ? Array.prototype.slice.call(list) : []
   }
@@ -112,8 +103,6 @@ BarWidget {
     return workspace && workspace.toplevels ? root.toArray(workspace.toplevels.values) : []
   }
 
-  // Base workspaces always appear; anything above that only appears once
-  // Hyprland reports it, and drops back out once empty if hideEmpty is on.
   function visibleWorkspaceIds() {
     var ids = []
     for (var n = 1; n <= root.workspaceCount; n++) ids.push(n)
@@ -132,7 +121,6 @@ BarWidget {
     })
   }
 
-  // Special (scratchpad-style) workspaces that currently hold windows.
   function specialWorkspaces() {
     if (!root.showSpecial) return []
     var out = []
@@ -146,7 +134,6 @@ BarWidget {
     return out
   }
 
-  // ------------------------------------------------------------ dispatching
   function dispatch(lua) {
     if (root.bar) root.bar.run("hyprctl dispatch " + Util.shellQuote(lua))
   }
@@ -187,8 +174,7 @@ BarWidget {
     root.dispatch("hl.dsp.workspace.toggle_special(" + root.luaString(name) + ")")
   }
 
-  // Wheel input is accumulated so a touchpad's stream of small deltas steps
-  // one workspace per notch-equivalent instead of flying through all of them.
+  // Accumulate deltas so a touchpad steps one workspace per notch, not one per event.
   property real wheelAccum: 0
 
   Timer { id: wheelResetTimer; interval: 300; onTriggered: root.wheelAccum = 0 }
@@ -205,7 +191,6 @@ BarWidget {
     root.dispatch("hl.dsp.focus({ workspace = " + root.luaString(step > 0 ? "e+1" : "e-1") + " })")
   }
 
-  // ------------------------------------------------------------ path helpers
   readonly property string home: Quickshell.env("HOME") || ""
 
   function expandPath(path) {
@@ -218,10 +203,7 @@ BarWidget {
     return value
   }
 
-  // ------------------------------------------------------------- icon rules
-  // User-supplied overrides, checked ahead of every built-in rule. entries is
-  // the plain-object form stored on disk; customIconRules is compiled from it
-  // (RegExp objects aren't JSON-serializable).
+  // Kept apart from the compiled rules because RegExp objects can't be saved as JSON.
   property var iconOverrideEntries: []
   property var customIconRules: []
   property var iconCache: ({})
@@ -303,8 +285,7 @@ BarWidget {
     return (ipc && ipc.title) || ""
   }
 
-  // Cached by class only: class is stable for a window's lifetime while its
-  // title changes constantly; title rules are checked fresh each time.
+  // Cached by class only, since titles change constantly.
   function iconForClass(clsRaw, titleRaw) {
     var cls = String(clsRaw || "").toLowerCase()
     var title = String(titleRaw || "").toLowerCase()
@@ -337,7 +318,6 @@ BarWidget {
     return titles.join("\n")
   }
 
-  // Distinct window classes currently open, across every workspace.
   function openAppOptions() {
     var seen = {}
     var out = []
@@ -352,7 +332,6 @@ BarWidget {
     return out
   }
 
-  // --------------------------------------------------------------- labels
   function workspaceName(id) {
     var name = root.workspaceNames[String(id)]
     return name ? String(name) : ""
@@ -360,7 +339,7 @@ BarWidget {
 
   function numberLabel(id, occupied) {
     var parts = []
-    // An empty pill with numbers off would otherwise render as a blank gap.
+    // An empty pill with numbers off would otherwise be blank.
     if (root.showNumbers || !root.showIcons || !occupied) parts.push(id === 10 ? "0" : String(id))
     var name = root.workspaceName(id)
     if (name) parts.push(name)
@@ -389,9 +368,7 @@ BarWidget {
       + Util.shellQuote(JSON.stringify(next)) + " --json")
   }
 
-  // ------------------------------------------------------------- popups
-  // One popup at a time, keyed by mode. Each card is its own popout owner so
-  // the bar can close it when another widget opens a panel.
+  // Each card is its own popout owner so the bar can close it when another panel opens.
   property string popupMode: ""
   property var popupAnchor: null
   property var menuToplevel: null
@@ -420,16 +397,11 @@ BarWidget {
 
   function openRulesEditor(cls) {
     root.rulesEditorPrefill = cls || ""
-    // onOpenChanged only fires on the transition, so a re-open needs the
-    // field set directly too.
+    // onOpenChanged doesn't fire if the editor is already open.
     if (root.popupMode === "rules") patternField.text = root.rulesEditorPrefill
     root.openPopup("rules", root)
   }
 
-  // ------------------------------------------------------------- profiles
-  // A profile is { name, apps: [{ class, workspace, command }] }. Applying one
-  // launches only the apps that aren't already open, then moves each new
-  // window onto its workspace as it maps.
   property var profiles: []
   property string profileStatus: ""
   property bool capturing: false
@@ -549,7 +521,6 @@ BarWidget {
     })
   }
 
-  // Windows on regular workspaces, ordered by workspace then left-to-right.
   function layoutToplevels() {
     var tops = root.allToplevels()
     tops = tops.filter(function (t) { return t.workspace && t.workspace.id > 0 && root.toplevelClass(t) !== "" })
@@ -562,9 +533,7 @@ BarWidget {
     return tops
   }
 
-  // Chromium-family web apps (Omarchy web apps included) get classes like
-  // "brave-web.whatsapp.com__-Default": host, then the URL path with "/"
-  // turned into "_", then the browser profile.
+  // Chromium web app classes look like "brave-web.whatsapp.com__path-Default" ("/" in the path becomes "_").
   function parseWebApp(cls) {
     var m = /^(?:chrome|chromium|brave|msedge|microsoft-edge|vivaldi|helium|opera|thorium)-(.+?)__(.*)-[^-]+$/i.exec(String(cls || ""))
     if (!m) return null
@@ -609,9 +578,7 @@ BarWidget {
     return ""
   }
 
-  // Resolve each toplevel to { class, workspace, command }. Apps with no
-  // desktop entry fall back to their process command line, read in one
-  // batch from /proc.
+  // Apps without a desktop entry fall back to their command line from /proc.
   property var resolveQueue: []
 
   function resolveApps(tops, callback) {
@@ -667,8 +634,7 @@ BarWidget {
     var profile = root.profiles[index]
     if (!profile) return
 
-    // Claim already-open windows first on their saved workspace, then
-    // anywhere; only what's left unclaimed gets launched.
+    // Match same-workspace windows first so a later entry can't take them.
     var open = []
     var tops = root.allToplevels()
     for (var i = 0; i < tops.length; i++) {
@@ -712,8 +678,7 @@ BarWidget {
     root.profileStatus = status
   }
 
-  // openwindow payload: "ADDRESS,WORKSPACENAME,CLASS,TITLE" (title may
-  // contain commas, the first three fields can't).
+  // Payload is "ADDRESS,WORKSPACE,CLASS,TITLE"; only the title can contain commas.
   function placePendingWindow(data) {
     if (root.pendingPlacements.length === 0) return
     var parts = data.split(",")
@@ -738,7 +703,6 @@ BarWidget {
     root.pendingPlacements = remaining
   }
 
-  // ------------------------------------------------------------------ layout
   readonly property int pillGap: root.compact ? Style.space(2) : Style.space(4)
   readonly property int pillHeight: root.barSize - Style.space(4)
   readonly property real numberMargin: root.compact ? 5 : 7
@@ -774,8 +738,6 @@ BarWidget {
         implicitWidth: root.vertical ? root.pillHeight : pillContent.implicitWidth
         implicitHeight: root.vertical ? pillContent.implicitHeight : root.pillHeight
 
-        // Always rounded: a workspace pill is chrome, not a window, so it
-        // shouldn't go square just because the Hyprland theme is sharp.
         radius: root.compact ? Style.space(6) : Style.space(8)
         color: {
           if (pill.urgent) return Util.alpha(Color.urgent, 0.35)
@@ -852,8 +814,6 @@ BarWidget {
             onWheelMoved: function (delta) { root.handleWheel(delta) }
           }
 
-          // Keeps a little breathing room after the last icon so the pill's
-          // rounded end doesn't crowd the glyph.
           Item {
             visible: pill.shownTops.length > 0 && !root.vertical
             width: Style.space(3)
@@ -924,7 +884,6 @@ BarWidget {
     }
   }
 
-  // ------------------------------------------------------------ profiles UI
   PopupCard {
     id: profilesPopup
     anchorItem: root.popupMode === "profiles" && root.popupAnchor ? root.popupAnchor : root
@@ -949,7 +908,6 @@ BarWidget {
     }
   }
 
-  // ----------------------------------------------------------- window menu
   PopupCard {
     id: windowMenu
     anchorItem: root.popupMode === "window" && root.popupAnchor ? root.popupAnchor : root
@@ -1050,7 +1008,6 @@ BarWidget {
     }
   }
 
-  // -------------------------------------------------------- workspace menu
   PopupCard {
     id: workspaceMenu
     anchorItem: root.popupMode === "workspace" && root.popupAnchor ? root.popupAnchor : root
@@ -1119,10 +1076,6 @@ BarWidget {
     }
   }
 
-  // --------------------------------------------------------- icon rules UI
-  // An editor for the icon-overrides file so adding or fixing an icon doesn't
-  // require hand-editing JSON. The app picker only fills the pattern field,
-  // which stays a free-text regex so a pick can be broadened before saving.
   PopupCard {
     id: rulesPopup
     anchorItem: root

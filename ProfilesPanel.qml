@@ -2,8 +2,6 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// Profiles popup body. All state and mutations live on `widget` (BarWidget);
-// this file is layout only.
 Column {
   id: panel
 
@@ -21,7 +19,6 @@ Column {
     panel.editingIndex = -1
   }
 
-  // ------------------------------------------------------------------ header
   Item {
     width: panel.width
     height: Math.max(title.implicitHeight, addButton.implicitHeight)
@@ -59,7 +56,6 @@ Column {
     wrapMode: Text.WordWrap
   }
 
-  // ----------------------------------------------------------------- profiles
   Repeater {
     model: panel.profiles
 

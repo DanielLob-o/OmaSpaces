@@ -2,7 +2,6 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// Inline editor shown under a profile row when its gear is toggled.
 Rectangle {
   id: editor
 
@@ -53,7 +52,6 @@ Rectangle {
       }
     }
 
-    // One line per app: glyph, class, workspace stepper, remove.
     Column {
       width: parent.width
       spacing: Style.spacing.xs
@@ -126,8 +124,6 @@ Rectangle {
       }
     }
 
-    // Add an app that's open right now; its launch command is resolved the
-    // same way a capture does.
     Row {
       width: parent.width
       spacing: Style.spacing.controlGap

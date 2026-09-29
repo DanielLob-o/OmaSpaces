@@ -1,8 +1,6 @@
 import QtQuick
 import qs.Commons
 
-// One app in a profile: its desktop icon (or glyph fallback) with the target
-// workspace number as a badge in the corner.
 Item {
   id: chip
 

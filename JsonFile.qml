@@ -1,9 +1,6 @@
 import QtQuick
 import Quickshell.Io
 
-// A watched JSON file: `value` tracks the parsed contents (null when the file
-// is missing or invalid) and write() persists a new value, creating the parent
-// directory first since FileView.setText() won't.
 Item {
   id: store
 
@@ -33,9 +30,9 @@ Item {
     store.setValue(next)
     store.pendingText = JSON.stringify(next, null, 2) + "\n"
     var slash = store.path.lastIndexOf("/")
+    // FileView.setText() doesn't create parent directories.
     mkdir.command = ["mkdir", "-p", slash > 0 ? store.path.substring(0, slash) : store.path]
-    // A write that lands while mkdir is still running is picked up by its
-    // onExited, which always flushes the latest pendingText.
+    // A running mkdir flushes the latest pendingText when it exits.
     if (!mkdir.running) mkdir.running = true
   }
 

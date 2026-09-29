@@ -5,7 +5,7 @@
   "version": "1.2.0",
   "author": "Daniel Lobo",
   "license": "MIT",
-  "description": "Configurable Hyprland workspace indicators with clickable per-window app icons, workspace names, scratchpad pills, and workspace profiles that relaunch your app layout.",
+  "description": "Hyprland workspace pills with clickable app icons, workspace names, scratchpad pills, and profiles that relaunch your app layout.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Omaspaces",
-    "description": "Workspace pills with clickable per-app icons. Right-click an icon to move or close its window, right-click a number to rename the workspace, and use the profiles button to save and restore app layouts.",
+    "description": "Workspace pills with clickable app icons. Right-click an icon to move or close its window, right-click a number to rename the workspace, and use the profiles button to save and restore app layouts.",
     "category": "Compositor",
     "allowMultiple": false,
     "defaultSection": "center",
@@ -39,14 +39,14 @@
         "key": "showIcons",
         "type": "boolean",
         "label": "Show app icons",
-        "description": "Render a glyph for each open window's app inside its workspace pill.",
+        "description": "Show an icon for each open window.",
         "defaultValue": true
       },
       {
         "key": "showNumbers",
         "type": "boolean",
         "label": "Show workspace numbers",
-        "description": "Show the workspace number. Turned off, an icon-only pill still falls back to numbers when app icons are also off.",
+        "description": "Show workspace numbers. Empty workspaces always show theirs.",
         "defaultValue": true
       },
       {
@@ -63,7 +63,7 @@
         "key": "maxWorkspaceId",
         "type": "integer",
         "label": "Highest workspace shown",
-        "description": "Workspaces above the base count are shown only up to this id, and only once they have a window.",
+        "description": "Highest workspace shown once it has windows.",
         "min": 1,
         "max": 10,
         "step": 1,
@@ -73,14 +73,14 @@
         "key": "hideEmpty",
         "type": "boolean",
         "label": "Hide empty extra workspaces",
-        "description": "Beyond the base count, drop workspaces entirely once their last window closes instead of leaving a dimmed placeholder.",
+        "description": "Hide empty workspaces above the base count instead of dimming them.",
         "defaultValue": false
       },
       {
         "key": "iconLimit",
         "type": "integer",
         "label": "Max icons per workspace",
-        "description": "Caps how many app icons a single pill draws before collapsing the rest into a +N count.",
+        "description": "Icons per pill before the rest collapse into +N.",
         "min": 1,
         "max": 8,
         "step": 1,
@@ -90,7 +90,7 @@
         "key": "accentSource",
         "type": "enum",
         "label": "Active color",
-        "description": "Palette role used to tint the active-workspace highlight.",
+        "description": "Color of the active workspace highlight.",
         "options": [
           "Accent",
           "Urgent",
@@ -102,49 +102,49 @@
         "key": "compact",
         "type": "boolean",
         "label": "Compact spacing",
-        "description": "Tighten padding and gaps between pills.",
+        "description": "Tighter spacing between pills.",
         "defaultValue": false
       },
       {
         "key": "showTooltip",
         "type": "boolean",
         "label": "Show window titles on hover",
-        "description": "Hovering a workspace pill lists the titles of its open windows.",
+        "description": "Show window titles on hover.",
         "defaultValue": true
       },
       {
         "key": "iconOverridesPath",
         "type": "path",
         "label": "Custom icon rules file",
-        "description": "Path to a JSON file of [{\"match\": \"regex\", \"icon\": \"glyph\"}, ...] rules, checked before the built-in icon list. Right-click any workspace pill to add rules through a UI instead of editing this file by hand. Supports ~ and $HOME. Reloads automatically when the file changes.",
+        "description": "JSON file of {\"match\": \"regex\", \"icon\": \"glyph\"} rules, checked before the built-in ones. Edit it from the bar by right-clicking an app icon. Supports ~ and $HOME.",
         "defaultValue": "~/.config/omarchy/omaspaces-icons.json"
       },
       {
         "key": "showSpecial",
         "type": "boolean",
         "label": "Show special workspaces",
-        "description": "Add a pill for each special (scratchpad) workspace that holds windows; click it to show or hide that workspace.",
+        "description": "Show a pill for each special workspace that holds windows. Click it to show or hide that workspace.",
         "defaultValue": true
       },
       {
         "key": "showProfiles",
         "type": "boolean",
         "label": "Show profiles button",
-        "description": "Show the button that opens workspace profiles: saved app layouts you can relaunch in one click.",
+        "description": "Show the button that opens workspace profiles.",
         "defaultValue": true
       },
       {
         "key": "workspaceNames",
         "type": "object",
         "label": "Workspace names",
-        "description": "Map of workspace id to a short name shown next to its number, e.g. {\"1\": \"dev\"}. Right-click a workspace number to edit it from the bar.",
+        "description": "Workspace names by id, e.g. {\"1\": \"dev\"}. Right-click a workspace number to edit.",
         "defaultValue": {}
       },
       {
         "key": "profilesPath",
         "type": "path",
         "label": "Profiles file",
-        "description": "JSON file where workspace profiles are stored. Supports ~ and $HOME. Reloads automatically when the file changes.",
+        "description": "JSON file where profiles are stored. Supports ~ and $HOME.",
         "defaultValue": "~/.config/omarchy/omaspaces-profiles.json"
       }
     ]
