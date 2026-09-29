@@ -2,9 +2,11 @@
 
 Configurable Hyprland workspace indicators for the [Omarchy](https://omarchy.org/) bar: each pill shows the workspace number (and an optional name) plus a clickable glyph for every open window's app. Right-click to move or close windows, and save app layouts as **profiles** you can relaunch in one click.
 
-![preview](preview.png)
+![Omaspaces with the workspace profiles panel open](preview.png)
 
 ## What you see
+
+![Workspace pills with per-app icons](bar.png)
 
 - **Pills** — one per workspace, numbered, holding a small glyph for each open
   window's app (capped, with a `+N` overflow past the limit).
@@ -20,6 +22,8 @@ Configurable Hyprland workspace indicators for the [Omarchy](https://omarchy.org
 - **Special workspaces** — a scratchpad that holds windows gets its own
   outlined pill with a window count; click it to show or hide it.
 - **Profiles button** — opens [workspace profiles](#workspace-profiles).
+
+![Right-click menu for a window: move to workspace, focus, icon rule, close](window-menu.png)
 
 ## Requirements
 
@@ -104,7 +108,7 @@ and choose **Icon rules…**. Then:
 3. Click **Add**. It applies immediately and is saved to the "Custom icon
    rules file" path above.
 
-![Icon rules editor, adding a DBeaver rule](custom_example.png)
+![Icon rules editor, prefilled with Ghostty's window class](custom_example.png)
 
 Existing rules are listed below the form with a **✕** to remove them. Since
 these are checked *before* the built-in rules, the editor also doubles as
@@ -140,6 +144,8 @@ A profile is a saved app layout, such as "At Work" or "At Home", listing
 which apps go on which workspace. Click the profiles button at the end of
 the pills to open them.
 
+![Profiles panel with two saved layouts](profiles.png)
+
 - **Capture the current layout** saves every open window's app and
   workspace as a new profile.
 - **Click a profile** to apply it. Apps that are already open are left
@@ -150,6 +156,8 @@ the pills to open them.
   different workspace with `‹ ›`, remove apps, add an app that's open right
   now, recapture the layout, or delete the profile.
 - **+** creates an empty profile to fill in through the editor.
+
+![Profile editor: rename, per-app workspace, add, recapture, delete](profile-editor.png)
 
 Launch commands are worked out when you capture: the app's desktop entry
 when it has one (Omarchy web apps like WhatsApp included), otherwise the
