@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
@@ -14,9 +13,7 @@ BarWidget {
   // Settings written via `omarchy bar set` without `--json` land in
   // shell.json as plain strings (e.g. "false"), and QML's own string->bool
   // coercion treats any non-empty string as true — so a bare `setting()`
-  // read would silently flip a boolean on. Style.qml's own boolToken()
-  // has the same guard for the same reason; mirrored here for settings we
-  // read ourselves.
+  // read would silently flip a boolean on.
   function boolSetting(key, fallback) {
     var value = root.setting(key, fallback)
     if (typeof value === "boolean") return value
@@ -24,6 +21,14 @@ BarWidget {
     if (s === "true" || s === "1" || s === "yes" || s === "on") return true
     if (s === "false" || s === "0" || s === "no" || s === "off") return false
     return fallback
+  }
+
+  function objectSetting(key) {
+    var value = root.setting(key, null)
+    if (typeof value === "string") {
+      try { value = JSON.parse(value) } catch (e) { value = null }
+    }
+    return value && typeof value === "object" && !Array.isArray(value) ? value : ({})
   }
 
   // -------------------------------------------------------------- settings
@@ -36,24 +41,53 @@ BarWidget {
   readonly property string accentSource: root.setting("accentSource", "Accent")
   readonly property bool compact: root.boolSetting("compact", false)
   readonly property bool showTooltip: root.boolSetting("showTooltip", true)
+  readonly property bool showSpecial: root.boolSetting("showSpecial", true)
+  readonly property bool showProfiles: root.boolSetting("showProfiles", true)
+  readonly property var workspaceNames: root.objectSetting("workspaceNames")
   readonly property string iconOverridesPath: String(root.setting("iconOverridesPath", "~/.config/omarchy/omaspaces-icons.json"))
+  readonly property string profilesPath: String(root.setting("profilesPath", "~/.config/omarchy/omaspaces-profiles.json"))
 
   readonly property color fgColor: root.bar ? root.bar.barForeground : Color.foreground
+  readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
   readonly property color accentColor: {
     if (root.accentSource === "Urgent") return Color.urgent
     if (root.accentSource === "Foreground") return root.fgColor
     return Color.accent
   }
 
+  // --------------------------------------------------------- hyprland state
   // Hyprland only pushes toplevel changes through IPC events; workspace
   // membership (which pill a window's icon belongs to) is stale until we
-  // explicitly ask for a refresh in response to one.
+  // explicitly ask for a refresh. Bursts of events are coalesced.
+  Timer {
+    id: refreshToplevelsTimer
+    interval: 40
+    onTriggered: Hyprland.refreshToplevels()
+  }
+
   Connections {
     target: Hyprland
     function onRawEvent(event) {
-      if (event.name === "openwindow" || event.name === "closewindow" || event.name === "movewindow" || event.name === "windowtitlev2" || event.name === "activewindow")
-        Hyprland.refreshToplevels()
+      var name = event.name
+      if (name === "openwindow") root.placePendingWindow(String(event.data || ""))
+      if (name === "openwindow" || name === "closewindow" || name === "movewindowv2" || name === "windowtitlev2" || name === "activewindow" || name === "urgent")
+        refreshToplevelsTimer.restart()
+      if (name === "activespecialv2" || name === "activespecial" || name === "focusedmonv2")
+        Hyprland.refreshMonitors()
     }
+  }
+
+  // Highlight the workspace shown on *this* bar's monitor, not whichever one
+  // has global focus, so each monitor's bar is correct on multi-head setups.
+  readonly property var barScreen: root.QsWindow.window ? root.QsWindow.window.screen : null
+  readonly property var monitor: root.barScreen ? Hyprland.monitorFor(root.barScreen) : Hyprland.focusedMonitor
+  readonly property int focusedId: {
+    if (root.monitor && root.monitor.activeWorkspace) return root.monitor.activeWorkspace.id
+    return Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : -1
+  }
+  readonly property string activeSpecialName: {
+    var ipc = root.monitor ? root.monitor.lastIpcObject : null
+    return ipc && ipc.specialWorkspace && ipc.specialWorkspace.name ? String(ipc.specialWorkspace.name) : ""
   }
 
   function workspaceById(id) {
@@ -64,13 +98,22 @@ BarWidget {
     return null
   }
 
-  function isOccupied(workspace) {
-    return workspace !== null && workspace.toplevels && workspace.toplevels.values.length > 0
+  // ObjectModel.values is a list-like sequence; copy it so slice/filter/sort
+  // are always real Array methods.
+  function toArray(list) {
+    return list ? Array.prototype.slice.call(list) : []
+  }
+
+  function allToplevels() {
+    return root.toArray(Hyprland.toplevels ? Hyprland.toplevels.values : null)
+  }
+
+  function toplevelsOf(workspace) {
+    return workspace && workspace.toplevels ? root.toArray(workspace.toplevels.values) : []
   }
 
   // Base workspaces always appear; anything above that only appears once
-  // Hyprland reports it (i.e. it has, or has had, a window), and drops back
-  // out once empty if hideEmpty is on.
+  // Hyprland reports it, and drops back out once empty if hideEmpty is on.
   function visibleWorkspaceIds() {
     var ids = []
     for (var n = 1; n <= root.workspaceCount; n++) ids.push(n)
@@ -83,25 +126,86 @@ BarWidget {
     ids.sort(function (a, b) { return a - b })
 
     if (!root.hideEmpty) return ids
-
-    var focusedId = Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : -1
     return ids.filter(function (id) {
-      if (id <= root.workspaceCount || id === focusedId) return true
-      return root.isOccupied(root.workspaceById(id))
+      if (id <= root.workspaceCount || id === root.focusedId) return true
+      return root.toplevelsOf(root.workspaceById(id)).length > 0
     })
   }
 
+  // Special (scratchpad-style) workspaces that currently hold windows.
+  function specialWorkspaces() {
+    if (!root.showSpecial) return []
+    var out = []
+    var values = Hyprland.workspaces.values
+    for (var i = 0; i < values.length; i++) {
+      var ws = values[i]
+      var name = String(ws.name || "")
+      if (ws.id < 0 && name.indexOf("special:") === 0 && root.toplevelsOf(ws).length > 0) out.push(ws)
+    }
+    out.sort(function (a, b) { return String(a.name).localeCompare(String(b.name)) })
+    return out
+  }
+
+  // ------------------------------------------------------------ dispatching
+  function dispatch(lua) {
+    if (root.bar) root.bar.run("hyprctl dispatch " + Util.shellQuote(lua))
+  }
+
+  function luaString(value) {
+    return JSON.stringify(String(value))
+  }
+
+  function windowAddress(toplevel) {
+    var ipc = toplevel ? toplevel.lastIpcObject : null
+    var address = String((toplevel && toplevel.address) || (ipc && ipc.address) || "")
+    if (address === "") return ""
+    return address.indexOf("0x") === 0 ? address : "0x" + address
+  }
+
   function focusWorkspace(id) {
-    if (!root.bar) return
-    root.bar.run("hyprctl dispatch " + Util.shellQuote("hl.dsp.focus({ workspace = \"" + id + "\" })"))
+    root.dispatch("hl.dsp.focus({ workspace = " + root.luaString(id) + " })")
   }
 
-  function switchWorkspace(delta) {
-    if (!root.bar) return
-    var target = (delta > 0 ? "e+" : "e") + Math.abs(delta)
-    root.bar.run("hyprctl dispatch " + Util.shellQuote('hl.dsp.focus({ workspace = "' + target + '" })'))
+  function focusWindow(toplevel) {
+    var address = root.windowAddress(toplevel)
+    if (address) root.dispatch("hl.dsp.focus({ window = " + root.luaString("address:" + address) + " })")
   }
 
+  function moveWindowToWorkspace(address, workspaceId) {
+    if (!address) return
+    root.dispatch("hl.dsp.window.move({ window = " + root.luaString("address:" + address)
+      + ", workspace = " + root.luaString(workspaceId) + ", follow = false })")
+  }
+
+  function closeWindow(toplevel) {
+    var address = root.windowAddress(toplevel)
+    if (address) root.dispatch("hl.dsp.window.close({ window = " + root.luaString("address:" + address) + " })")
+  }
+
+  function toggleSpecial(workspace) {
+    var name = String(workspace.name || "").replace(/^special:/, "")
+    root.dispatch("hl.dsp.workspace.toggle_special(" + root.luaString(name) + ")")
+  }
+
+  // Wheel input is accumulated so a touchpad's stream of small deltas steps
+  // one workspace per notch-equivalent instead of flying through all of them.
+  property real wheelAccum: 0
+
+  Timer { id: wheelResetTimer; interval: 300; onTriggered: root.wheelAccum = 0 }
+  Timer { id: wheelCooldown; interval: 140 }
+
+  function handleWheel(delta) {
+    if (!delta) return
+    root.wheelAccum += delta
+    wheelResetTimer.restart()
+    if (Math.abs(root.wheelAccum) < 120 || wheelCooldown.running) return
+    var step = root.wheelAccum > 0 ? 1 : -1
+    root.wheelAccum = 0
+    wheelCooldown.start()
+    root.dispatch("hl.dsp.focus({ workspace = " + root.luaString(step > 0 ? "e+1" : "e-1") + " })")
+  }
+
+  // ------------------------------------------------------------ path helpers
   readonly property string home: Quickshell.env("HOME") || ""
 
   function expandPath(path) {
@@ -114,89 +218,48 @@ BarWidget {
     return value
   }
 
-  // User-supplied overrides, checked ahead of every built-in rule so someone
-  // can pin an icon for an app the built-in list gets wrong (or misses)
-  // without forking IconRules.js. Kept as two arrays deliberately: entries
-  // is the plain-object form that's serialized to disk and driven by the
-  // editor UI below; customIconRules is compiled from it (regex objects
-  // aren't JSON-serializable, so the two can't be the same array). Scanning
-  // it fresh on every icon lookup costs nothing at this size — it's a
-  // handful of user-curated rules, not the built-in list.
+  // ------------------------------------------------------------- icon rules
+  // User-supplied overrides, checked ahead of every built-in rule. entries is
+  // the plain-object form stored on disk; customIconRules is compiled from it
+  // (RegExp objects aren't JSON-serializable).
   property var iconOverrideEntries: []
   property var customIconRules: []
+  property var iconCache: ({})
 
-  function parseIconOverrideEntries(raw) {
-    var text = String(raw || "").trim()
-    if (text === "") return []
-    var parsed
-    try {
-      parsed = JSON.parse(text)
-    } catch (e) {
-      console.warn("lobo.omaspaces: iconOverridesPath is not valid JSON: " + e)
-      return []
-    }
+  function parseIconOverrideEntries(parsed) {
     if (!Array.isArray(parsed)) return []
-
     var out = []
     for (var i = 0; i < parsed.length; i++) {
       var entry = parsed[i]
       if (!entry || typeof entry !== "object") continue
       var pattern = entry.match || entry.pattern
-      var icon = entry.icon
-      if (!pattern || !icon) continue
-      out.push({ match: String(pattern), icon: String(icon) })
-    }
-    return out
-  }
-
-  function compileIconOverrideEntries(entries) {
-    var out = []
-    for (var i = 0; i < entries.length; i++) {
-      try {
-        out.push({ re: new RegExp(entries[i].match, "i"), icon: entries[i].icon })
-      } catch (e) {
-        console.warn("lobo.omaspaces: skipping invalid icon override pattern " + JSON.stringify(entries[i].match))
-      }
+      if (!pattern || !entry.icon) continue
+      out.push({ match: String(pattern), icon: String(entry.icon) })
     }
     return out
   }
 
   function applyIconOverrideEntries(entries) {
+    var compiled = []
+    for (var i = 0; i < entries.length; i++) {
+      try {
+        compiled.push({ re: new RegExp(entries[i].match, "i"), icon: entries[i].icon })
+      } catch (e) {
+        console.warn("lobo.omaspaces: skipping invalid icon override pattern " + JSON.stringify(entries[i].match))
+      }
+    }
     root.iconOverrideEntries = entries
-    root.customIconRules = root.compileIconOverrideEntries(entries)
+    root.customIconRules = compiled
     root.iconCache = {}
   }
 
-  function reloadIconOverrides() {
-    root.applyIconOverrideEntries(root.parseIconOverrideEntries(iconOverridesFile.text()))
-  }
-
-  // FileView needs a concrete path even when the setting is unset; pointing
-  // it at a path that's never expected to exist keeps that case a plain,
-  // silent onLoadFailed instead of relying on unspecified empty-path behavior.
-  readonly property string iconOverridesEffectivePath: {
-    var p = root.expandPath(root.iconOverridesPath)
-    return p !== "" ? p : (root.home + "/.cache/omarchy/omaspaces-no-icon-overrides.json")
-  }
-
-  readonly property string iconOverridesDir: {
-    var p = root.iconOverridesEffectivePath
-    var slash = p.lastIndexOf("/")
-    return slash > 0 ? p.substring(0, slash) : p
-  }
-
-  // The rules editor writes here. mkdir -p first since the target directory
-  // (a user-typed path, or a first run before ~/.config/omarchy exists) may
-  // not exist yet — FileView.setText() doesn't create parent directories.
-  Process {
-    id: iconOverridesMkdir
-    onExited: iconOverridesFile.setText(JSON.stringify(root.iconOverrideEntries, null, 2) + "\n")
-  }
-
-  function saveIconOverrideEntries(entries) {
-    root.applyIconOverrideEntries(entries)
-    iconOverridesMkdir.command = ["mkdir", "-p", root.iconOverridesDir]
-    iconOverridesMkdir.running = true
+  JsonFile {
+    id: iconOverridesFile
+    path: {
+      var p = root.expandPath(root.iconOverridesPath)
+      return p !== "" ? p : (root.home + "/.cache/omarchy/omaspaces-no-icon-overrides.json")
+    }
+    onChanged: root.applyIconOverrideEntries(root.parseIconOverrideEntries(value))
   }
 
   function addIconOverride(pattern, icon) {
@@ -208,7 +271,7 @@ BarWidget {
     } catch (e) {
       return false
     }
-    root.saveIconOverrideEntries(root.iconOverrideEntries.concat([{ match: p, icon: i }]))
+    iconOverridesFile.write(root.iconOverrideEntries.concat([{ match: p, icon: i }]))
     return true
   }
 
@@ -216,18 +279,7 @@ BarWidget {
     var next = root.iconOverrideEntries.slice()
     if (index < 0 || index >= next.length) return
     next.splice(index, 1)
-    root.saveIconOverrideEntries(next)
-  }
-
-  FileView {
-    id: iconOverridesFile
-    path: root.iconOverridesEffectivePath
-    watchChanges: true
-    atomicWrites: true
-    printErrors: false
-    onLoaded: root.reloadIconOverrides()
-    onFileChanged: reload()
-    onLoadFailed: root.applyIconOverrideEntries([])
+    iconOverridesFile.write(next)
   }
 
   function customIconFor(cls, title) {
@@ -236,23 +288,6 @@ BarWidget {
       if (rules[i].re.test(title) || rules[i].re.test(cls)) return rules[i].icon
     }
     return ""
-  }
-
-  // Distinct window classes currently open, across every workspace — feeds
-  // the rules-editor picker so adding a rule doesn't require knowing (or
-  // looking up) an app's exact Hyprland window class by hand.
-  function openAppOptions() {
-    var seen = {}
-    var out = []
-    var tops = Hyprland.toplevels ? Hyprland.toplevels.values : []
-    for (var i = 0; i < tops.length; i++) {
-      var cls = root.toplevelClass(tops[i])
-      if (!cls || seen[cls]) continue
-      seen[cls] = true
-      out.push(cls)
-    }
-    out.sort()
-    return out
   }
 
   function toplevelClass(toplevel) {
@@ -268,22 +303,16 @@ BarWidget {
     return (ipc && ipc.title) || ""
   }
 
-  // Cached by class only (not title): most rules key off the window class,
-  // which is stable for a window's lifetime, while title changes constantly
-  // for things like browser tabs. Caching the combined class+title pair
-  // would mean the cache almost never hits for exactly the apps that most
-  // need it. The few rules that legitimately depend on title stay outside
-  // the cache in IconRules.iconForTitle, checked fresh every time.
-  property var iconCache: ({})
-
-  function iconForToplevel(toplevel) {
-    var cls = root.toplevelClass(toplevel).toLowerCase()
-    var title = root.toplevelTitle(toplevel).toLowerCase()
+  // Cached by class only: class is stable for a window's lifetime while its
+  // title changes constantly; title rules are checked fresh each time.
+  function iconForClass(clsRaw, titleRaw) {
+    var cls = String(clsRaw || "").toLowerCase()
+    var title = String(titleRaw || "").toLowerCase()
 
     var custom = root.customIconFor(cls, title)
     if (custom) return custom
 
-    var byTitle = IconRules.iconForTitle(title)
+    var byTitle = IconRules.iconForTitle(title, cls)
     if (byTitle) return byTitle
 
     var cached = root.iconCache[cls]
@@ -294,22 +323,12 @@ BarWidget {
     return icon
   }
 
-  function windowGlyphs(workspace) {
-    if (!workspace || !root.showIcons) return ""
-    var tops = workspace.toplevels ? workspace.toplevels.values : []
-    if (tops.length === 0) return ""
-
-    var shown = Math.min(tops.length, root.iconLimit)
-    var glyphs = []
-    for (var i = 0; i < shown; i++) glyphs.push(root.iconForToplevel(tops[i]))
-
-    var extra = tops.length - shown
-    return extra > 0 ? glyphs.join(" ") + " +" + extra : glyphs.join(" ")
+  function iconForToplevel(toplevel) {
+    return root.iconForClass(root.toplevelClass(toplevel), root.toplevelTitle(toplevel))
   }
 
   function windowTitles(workspace) {
-    if (!workspace) return ""
-    var tops = workspace.toplevels ? workspace.toplevels.values : []
+    var tops = root.toplevelsOf(workspace)
     var titles = []
     for (var i = 0; i < tops.length; i++) {
       var t = root.toplevelTitle(tops[i])
@@ -318,60 +337,424 @@ BarWidget {
     return titles.join("\n")
   }
 
-  // Active state is communicated purely through the pill's background — the
-  // number itself never changes shape, so a workspace with no matching icon
-  // rule (or icons disabled entirely) never renders as a blank,
-  // unclickable-looking gap either.
-  function labelFor(id, workspace) {
-    var parts = []
-    if (root.showNumbers || !root.showIcons)
-      parts.push(id === 10 ? "0" : String(id))
-    if (root.showIcons) {
-      var glyphs = root.windowGlyphs(workspace)
-      if (glyphs) parts.push(glyphs)
+  // Distinct window classes currently open, across every workspace.
+  function openAppOptions() {
+    var seen = {}
+    var out = []
+    var tops = root.allToplevels()
+    for (var i = 0; i < tops.length; i++) {
+      var cls = root.toplevelClass(tops[i])
+      if (!cls || seen[cls]) continue
+      seen[cls] = true
+      out.push(cls)
     }
+    out.sort()
+    return out
+  }
+
+  // --------------------------------------------------------------- labels
+  function workspaceName(id) {
+    var name = root.workspaceNames[String(id)]
+    return name ? String(name) : ""
+  }
+
+  function numberLabel(id, occupied) {
+    var parts = []
+    // An empty pill with numbers off would otherwise render as a blank gap.
+    if (root.showNumbers || !root.showIcons || !occupied) parts.push(id === 10 ? "0" : String(id))
+    var name = root.workspaceName(id)
+    if (name) parts.push(name)
     return parts.join(" ")
   }
 
-  function tooltipFor(workspace) {
+  function workspaceTooltip(id, workspace) {
     if (!root.showTooltip) return ""
+    var lines = []
+    var name = root.workspaceName(id)
+    lines.push("Workspace " + id + (name ? " · " + name : ""))
     var titles = root.windowTitles(workspace)
-    var hint = "Right-click: icon rules"
-    return titles ? titles + "\n" + hint : hint
+    if (titles) lines.push(titles)
+    lines.push("Right-click: rename · icon rules")
+    return lines.join("\n")
   }
 
-  // -------------------------------------------------------- icon rules editor
-  property bool rulesEditorOpen: false
+  function setWorkspaceName(id, name) {
+    var next = {}
+    var current = root.workspaceNames
+    for (var key in current) next[key] = current[key]
+    var trimmed = String(name || "").trim()
+    if (trimmed) next[String(id)] = trimmed
+    else delete next[String(id)]
+    if (root.bar) root.bar.run("omarchy-bar set " + Util.shellQuote(root.moduleName) + " workspaceNames "
+      + Util.shellQuote(JSON.stringify(next)) + " --json")
+  }
+
+  // ------------------------------------------------------------- popups
+  // One popup at a time, keyed by mode. Each card is its own popout owner so
+  // the bar can close it when another widget opens a panel.
+  property string popupMode: ""
+  property var popupAnchor: null
+  property var menuToplevel: null
+  property int menuWorkspaceId: -1
   property string rulesEditorPrefill: ""
 
-  function openRulesEditor(workspace) {
-    var tops = workspace && workspace.toplevels ? workspace.toplevels.values : []
-    var cls = tops.length > 0 ? root.toplevelClass(tops[0]) : ""
-    root.rulesEditorPrefill = cls
-    // onOpenChanged only fires on the open/close transition, so re-opening
-    // via a different pill while the popup is already up needs a direct
-    // set here too, or the pattern field would keep showing the first
-    // pill's prefill.
-    if (root.rulesEditorOpen) patternField.text = cls
-    root.rulesEditorOpen = true
+  function openPopup(mode, anchor) {
+    root.popupAnchor = anchor || root
+    root.popupMode = mode
   }
 
-  readonly property int focusedId: Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : -1
+  function closePopup(mode) {
+    if (root.popupMode === mode) root.popupMode = ""
+  }
+
+  function openWindowMenu(toplevel, anchor) {
+    root.menuToplevel = toplevel
+    root.openPopup("window", anchor)
+  }
+
+  function openWorkspaceMenu(id, anchor) {
+    root.menuWorkspaceId = id
+    workspaceNameField.text = root.workspaceName(id)
+    root.openPopup("workspace", anchor)
+  }
+
+  function openRulesEditor(cls) {
+    root.rulesEditorPrefill = cls || ""
+    // onOpenChanged only fires on the transition, so a re-open needs the
+    // field set directly too.
+    if (root.popupMode === "rules") patternField.text = root.rulesEditorPrefill
+    root.openPopup("rules", root)
+  }
+
+  // ------------------------------------------------------------- profiles
+  // A profile is { name, apps: [{ class, workspace, command }] }. Applying one
+  // launches only the apps that aren't already open, then moves each new
+  // window onto its workspace as it maps.
+  property var profiles: []
+  property string profileStatus: ""
+  property bool capturing: false
+  property var pendingPlacements: []
+
+  function normalizeProfiles(value) {
+    if (!Array.isArray(value)) return []
+    var out = []
+    for (var i = 0; i < value.length; i++) {
+      var p = value[i]
+      if (!p || typeof p !== "object") continue
+      var apps = []
+      var rawApps = Array.isArray(p.apps) ? p.apps : []
+      for (var j = 0; j < rawApps.length; j++) {
+        var a = rawApps[j]
+        if (!a || !a.class) continue
+        apps.push({
+          class: String(a.class),
+          workspace: Util.clamp(Math.round(Number(a.workspace) || 1), 1, 10),
+          command: String(a.command || "")
+        })
+      }
+      out.push({ name: String(p.name || ("Profile " + (out.length + 1))), apps: apps })
+    }
+    return out
+  }
+
+  JsonFile {
+    id: profilesFile
+    path: root.expandPath(root.profilesPath) || (root.home + "/.config/omarchy/omaspaces-profiles.json")
+    onChanged: root.profiles = root.normalizeProfiles(value)
+  }
+
+  function saveProfiles(next) {
+    profilesFile.write(next)
+  }
+
+  function cloneProfiles() {
+    return JSON.parse(JSON.stringify(root.profiles))
+  }
+
+  function uniqueProfileName(base) {
+    var names = root.profiles.map(function (p) { return p.name })
+    for (var n = root.profiles.length + 1; ; n++) {
+      var candidate = base + " " + n
+      if (names.indexOf(candidate) === -1) return candidate
+    }
+  }
+
+  function newEmptyProfile() {
+    var next = root.cloneProfiles()
+    next.push({ name: root.uniqueProfileName("Profile"), apps: [] })
+    root.saveProfiles(next)
+    return next.length - 1
+  }
+
+  function renameProfile(index, name) {
+    var trimmed = String(name || "").trim()
+    if (!trimmed || index < 0 || index >= root.profiles.length) return
+    var next = root.cloneProfiles()
+    next[index].name = trimmed
+    root.saveProfiles(next)
+  }
+
+  function deleteProfile(index) {
+    if (index < 0 || index >= root.profiles.length) return
+    var next = root.cloneProfiles()
+    next.splice(index, 1)
+    root.saveProfiles(next)
+  }
+
+  function setProfileAppWorkspace(index, appIndex, workspace) {
+    var next = root.cloneProfiles()
+    if (!next[index] || !next[index].apps[appIndex]) return
+    next[index].apps[appIndex].workspace = Util.clamp(workspace, 1, 10)
+    root.saveProfiles(next)
+  }
+
+  function removeProfileApp(index, appIndex) {
+    var next = root.cloneProfiles()
+    if (!next[index] || !next[index].apps[appIndex]) return
+    next[index].apps.splice(appIndex, 1)
+    root.saveProfiles(next)
+  }
+
+  function addProfileApp(index, cls) {
+    var tops = root.allToplevels()
+    for (var i = 0; i < tops.length; i++) {
+      if (root.toplevelClass(tops[i]) !== cls) continue
+      root.resolveApps([tops[i]], function (apps) {
+        var next = root.cloneProfiles()
+        if (!next[index]) return
+        next[index].apps = next[index].apps.concat(apps)
+        root.saveProfiles(next)
+      })
+      return
+    }
+  }
+
+  function captureNewProfile(onCreated) {
+    root.resolveApps(root.layoutToplevels(), function (apps) {
+      var next = root.cloneProfiles()
+      next.push({ name: root.uniqueProfileName("Layout"), apps: apps })
+      root.saveProfiles(next)
+      root.profileStatus = "Captured " + apps.length + " app" + (apps.length === 1 ? "" : "s") + " into " + next[next.length - 1].name
+      if (onCreated) onCreated(next.length - 1)
+    })
+  }
+
+  function recaptureProfile(index) {
+    root.resolveApps(root.layoutToplevels(), function (apps) {
+      var next = root.cloneProfiles()
+      if (!next[index]) return
+      next[index].apps = apps
+      root.saveProfiles(next)
+      root.profileStatus = "Recaptured " + next[index].name + " · " + apps.length + " apps"
+    })
+  }
+
+  // Windows on regular workspaces, ordered by workspace then left-to-right.
+  function layoutToplevels() {
+    var tops = root.allToplevels()
+    tops = tops.filter(function (t) { return t.workspace && t.workspace.id > 0 && root.toplevelClass(t) !== "" })
+    tops.sort(function (a, b) {
+      if (a.workspace.id !== b.workspace.id) return a.workspace.id - b.workspace.id
+      var ax = a.lastIpcObject && a.lastIpcObject.at ? a.lastIpcObject.at[0] : 0
+      var bx = b.lastIpcObject && b.lastIpcObject.at ? b.lastIpcObject.at[0] : 0
+      return ax - bx
+    })
+    return tops
+  }
+
+  // Chromium-family web apps (Omarchy web apps included) get classes like
+  // "brave-web.whatsapp.com__-Default": host, then the URL path with "/"
+  // turned into "_", then the browser profile.
+  function parseWebApp(cls) {
+    var m = /^(?:chrome|chromium|brave|msedge|microsoft-edge|vivaldi|helium|opera|thorium)-(.+?)__(.*)-[^-]+$/i.exec(String(cls || ""))
+    if (!m) return null
+    var path = m[2].replace(/_/g, "/")
+    return { host: m[1], path: path, url: "https://" + m[1] + "/" + path }
+  }
+
+  function desktopEntryFor(cls) {
+    var web = root.parseWebApp(cls)
+    if (web) {
+      var needle = web.path ? web.host + "/" + web.path : web.host
+      var values = DesktopEntries.applications.values || []
+      for (var i = 0; i < values.length; i++) {
+        var exec = String(values[i].execString || "")
+        if (exec.indexOf(needle) !== -1 && /omarchy-launch-webapp|--app=/.test(exec)) return values[i]
+      }
+      return null
+    }
+    return cls ? DesktopEntries.heuristicLookup(cls) : null
+  }
+
+  function appIconSource(cls) {
+    var entry = root.desktopEntryFor(cls)
+    var icon = entry ? String(entry.icon || "") : ""
+    if (!icon) return ""
+    if (icon.charAt(0) === "/") return "file://" + icon
+    return Quickshell.iconPath(icon, true)
+  }
+
+  function displayClass(cls) {
+    var web = root.parseWebApp(cls)
+    if (web) return web.host + (web.path ? "/" + web.path : "")
+    var entry = root.desktopEntryFor(cls)
+    return entry && entry.name ? entry.name : cls
+  }
+
+  function launchCommandFor(cls) {
+    var entry = root.desktopEntryFor(cls)
+    if (entry && entry.id) return "uwsm-app -- gtk-launch " + Util.shellQuote(entry.id + ".desktop")
+    var web = root.parseWebApp(cls)
+    if (web) return "omarchy-launch-webapp " + Util.shellQuote(web.url)
+    return ""
+  }
+
+  // Resolve each toplevel to { class, workspace, command }. Apps with no
+  // desktop entry fall back to their process command line, read in one
+  // batch from /proc.
+  property var resolveQueue: []
+
+  function resolveApps(tops, callback) {
+    var apps = []
+    var unresolved = []
+    for (var i = 0; i < tops.length; i++) {
+      var cls = root.toplevelClass(tops[i])
+      var app = { class: cls, workspace: tops[i].workspace ? Math.max(1, tops[i].workspace.id) : 1, command: root.launchCommandFor(cls) }
+      apps.push(app)
+      var pid = tops[i].lastIpcObject ? tops[i].lastIpcObject.pid : 0
+      if (!app.command && pid > 0) unresolved.push({ app: app, pid: pid })
+    }
+
+    if (unresolved.length === 0) {
+      callback(apps)
+      return
+    }
+    root.resolveQueue = root.resolveQueue.concat([{ apps: apps, unresolved: unresolved, callback: callback }])
+    root.runNextResolve()
+  }
+
+  function runNextResolve() {
+    if (cmdlineProc.running || root.resolveQueue.length === 0) return
+    var job = root.resolveQueue[0]
+    root.capturing = true
+    cmdlineProc.command = ["bash", "-c",
+      "for pid in \"$@\"; do tr '\\0' '\\037' < /proc/$pid/cmdline 2>/dev/null; echo; done",
+      "omaspaces"].concat(job.unresolved.map(function (u) { return String(u.pid) }))
+    cmdlineProc.running = true
+  }
+
+  Process {
+    id: cmdlineProc
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var job = root.resolveQueue[0]
+        root.resolveQueue = root.resolveQueue.slice(1)
+        root.capturing = root.resolveQueue.length > 0
+        if (job) {
+          var lines = String(this.text || "").split("\n")
+          for (var i = 0; i < job.unresolved.length; i++) {
+            var args = String(lines[i] || "").split("\x1f").filter(function (a) { return a !== "" })
+            if (args.length > 0) job.unresolved[i].app.command = "uwsm-app -- " + args.map(function (a) { return Util.shellQuote(a) }).join(" ")
+          }
+          job.callback(job.apps.filter(function (a) { return a.command !== "" }))
+        }
+        root.runNextResolve()
+      }
+    }
+  }
+
+  function applyProfile(index) {
+    var profile = root.profiles[index]
+    if (!profile) return
+
+    // Claim already-open windows first on their saved workspace, then
+    // anywhere; only what's left unclaimed gets launched.
+    var open = []
+    var tops = root.allToplevels()
+    for (var i = 0; i < tops.length; i++) {
+      if (!tops[i].workspace || tops[i].workspace.id <= 0) continue
+      open.push({ cls: root.toplevelClass(tops[i]).toLowerCase(), ws: tops[i].workspace.id, claimed: false })
+    }
+
+    var satisfied = profile.apps.map(function () { return false })
+    function claim(sameWorkspace) {
+      for (var a = 0; a < profile.apps.length; a++) {
+        if (satisfied[a]) continue
+        var cls = profile.apps[a].class.toLowerCase()
+        for (var w = 0; w < open.length; w++) {
+          if (open[w].claimed || open[w].cls !== cls) continue
+          if (sameWorkspace && open[w].ws !== profile.apps[a].workspace) continue
+          open[w].claimed = true
+          satisfied[a] = true
+          break
+        }
+      }
+    }
+    claim(true)
+    claim(false)
+
+    var launched = 0
+    var skipped = 0
+    var expires = Date.now() + 30000
+    var pending = root.pendingPlacements.filter(function (p) { return p.expires > Date.now() })
+    for (var k = 0; k < profile.apps.length; k++) {
+      if (satisfied[k]) continue
+      var app = profile.apps[k]
+      if (!app.command) { skipped++; continue }
+      pending.push({ cls: app.class.toLowerCase(), workspace: app.workspace, expires: expires })
+      if (root.bar) root.bar.run(app.command)
+      launched++
+    }
+    root.pendingPlacements = pending
+
+    var status = profile.name + " ready · " + (launched > 0 ? launched + " opened" : "everything already open")
+    if (skipped > 0) status += " · " + skipped + " without a launch command"
+    root.profileStatus = status
+  }
+
+  // openwindow payload: "ADDRESS,WORKSPACENAME,CLASS,TITLE" (title may
+  // contain commas, the first three fields can't).
+  function placePendingWindow(data) {
+    if (root.pendingPlacements.length === 0) return
+    var parts = data.split(",")
+    if (parts.length < 3) return
+    var address = parts[0].indexOf("0x") === 0 ? parts[0] : "0x" + parts[0]
+    var workspaceName = parts[1]
+    var cls = parts[2].toLowerCase()
+
+    var now = Date.now()
+    var remaining = []
+    var placed = false
+    for (var i = 0; i < root.pendingPlacements.length; i++) {
+      var p = root.pendingPlacements[i]
+      if (p.expires <= now) continue
+      if (!placed && p.cls === cls) {
+        placed = true
+        if (workspaceName !== String(p.workspace)) root.moveWindowToWorkspace(address, p.workspace)
+        continue
+      }
+      remaining.push(p)
+    }
+    root.pendingPlacements = remaining
+  }
+
+  // ------------------------------------------------------------------ layout
   readonly property int pillGap: root.compact ? Style.space(2) : Style.space(4)
-  readonly property real trailingGap: root.vertical ? 0 : Style.spaceReal(6)
+  readonly property int pillHeight: root.barSize - Style.space(4)
+  readonly property real numberMargin: root.compact ? 5 : 7
+  readonly property real iconMargin: root.compact ? 2 : 3
 
-  implicitWidth: root.vertical ? root.barSize : grid.implicitWidth + trailingGap
-  implicitHeight: root.vertical ? grid.implicitHeight : root.barSize
+  implicitWidth: root.vertical ? root.barSize : pills.implicitWidth
+  implicitHeight: root.vertical ? pills.implicitHeight : root.barSize
 
-  GridLayout {
-    id: grid
-    anchors.left: parent.left
-    anchors.top: parent.top
-    anchors.bottom: root.vertical ? undefined : parent.bottom
-    anchors.right: root.vertical ? parent.right : undefined
-    columns: root.vertical ? 1 : Math.max(1, root.visibleWorkspaceIds().length)
-    columnSpacing: root.vertical ? 0 : root.pillGap
-    rowSpacing: root.vertical ? root.pillGap : 0
+  Grid {
+    id: pills
+    anchors.centerIn: parent
+    columns: root.vertical ? 1 : 64
+    columnSpacing: root.pillGap
+    rowSpacing: root.pillGap
+    verticalItemAlignment: Grid.AlignVCenter
+    horizontalItemAlignment: Grid.AlignHCenter
 
     Repeater {
       model: root.visibleWorkspaceIds()
@@ -381,71 +764,374 @@ BarWidget {
         required property int modelData
 
         readonly property var workspace: root.workspaceById(pill.modelData)
-        readonly property bool occupied: root.isOccupied(pill.workspace)
+        readonly property var tops: root.toplevelsOf(pill.workspace)
+        readonly property bool occupied: pill.tops.length > 0
         readonly property bool focused: root.focusedId === pill.modelData
         readonly property bool urgent: pill.workspace !== null && pill.workspace.urgent === true
-        readonly property color stateColor: pill.urgent ? Color.urgent : root.accentColor
-        property bool hot: false
+        readonly property var shownTops: root.showIcons ? pill.tops.slice(0, root.iconLimit) : []
+        readonly property int extra: root.showIcons ? Math.max(0, pill.tops.length - root.iconLimit) : 0
 
-        Layout.alignment: Qt.AlignVCenter
-        Layout.fillHeight: !root.vertical
-        Layout.fillWidth: root.vertical
-        implicitWidth: root.vertical ? (root.barSize - Style.space(4)) : btn.implicitWidth
-        implicitHeight: root.vertical ? btn.implicitHeight : root.barSize - Style.space(4)
+        implicitWidth: root.vertical ? root.pillHeight : pillContent.implicitWidth
+        implicitHeight: root.vertical ? pillContent.implicitHeight : root.pillHeight
 
-        // Always rounded, independent of the theme's window corner-radius
-        // setting: a workspace pill is chrome, not a window, so it shouldn't
-        // go razor-square just because the active Hyprland theme is sharp.
+        // Always rounded: a workspace pill is chrome, not a window, so it
+        // shouldn't go square just because the Hyprland theme is sharp.
         radius: root.compact ? Style.space(6) : Style.space(8)
         color: {
-          if (pill.focused || pill.urgent) return Util.alpha(pill.stateColor, 0.22)
-          return pill.hot ? Util.alpha(root.fgColor, 0.08) : "transparent"
+          if (pill.urgent) return Util.alpha(Color.urgent, 0.35)
+          if (pill.focused) return Util.alpha(root.accentColor, 0.22)
+          return pillHover.hovered ? Util.alpha(root.fgColor, 0.08) : "transparent"
         }
 
         Behavior on color { ColorAnimation { duration: 120 } }
 
-        WidgetButton {
-          id: btn
-          anchors.fill: parent
-          bar: root.bar
-          text: root.labelFor(pill.modelData, pill.workspace)
-          fontSize: root.vertical ? Style.font.icon : Style.font.body
-          horizontalMargin: root.compact ? 5 : 8
-          active: pill.focused || pill.urgent
-          activeColor: pill.urgent ? Color.background : root.accentColor
-          dimmed: !pill.occupied && !pill.focused
-          tooltipText: root.tooltipFor(pill.workspace)
-          onPressed: function (button) {
-            if (button === Qt.LeftButton) root.focusWorkspace(pill.modelData)
-            else if (button === Qt.RightButton) root.openRulesEditor(pill.workspace)
-          }
-          onWheelMoved: function (delta) { root.switchWorkspace(delta > 0 ? 1 : -1) }
-        }
+        HoverHandler { id: pillHover }
 
-        HoverHandler {
-          onHoveredChanged: pill.hot = hovered
+        Grid {
+          id: pillContent
+          anchors.centerIn: parent
+          columns: root.vertical ? 1 : 64
+          verticalItemAlignment: Grid.AlignVCenter
+          horizontalItemAlignment: Grid.AlignHCenter
+
+          WidgetButton {
+            bar: root.bar
+            visible: text !== ""
+            text: root.numberLabel(pill.modelData, pill.occupied)
+            fontSize: root.vertical ? Style.font.icon : Style.font.body
+            horizontalMargin: root.numberMargin
+            fixedHeight: root.vertical ? -1 : root.pillHeight
+            fixedWidth: root.vertical ? root.pillHeight : -1
+            active: pill.focused && !pill.urgent
+            activeColor: root.accentColor
+            dimmed: !pill.occupied && !pill.focused
+            tooltipText: root.workspaceTooltip(pill.modelData, pill.workspace)
+            onPressed: function (button) {
+              if (button === Qt.RightButton) root.openWorkspaceMenu(pill.modelData, pill)
+              else root.focusWorkspace(pill.modelData)
+            }
+            onWheelMoved: function (delta) { root.handleWheel(delta) }
+          }
+
+          Repeater {
+            model: pill.shownTops
+
+            WidgetButton {
+              id: iconButton
+              required property var modelData
+
+              bar: root.bar
+              text: root.iconForToplevel(iconButton.modelData)
+              fontSize: root.vertical ? Style.font.icon : Style.font.body
+              horizontalMargin: root.iconMargin
+              fixedHeight: root.vertical ? -1 : root.pillHeight
+              fixedWidth: root.vertical ? root.pillHeight : -1
+              active: pill.focused && !pill.urgent
+              activeColor: root.accentColor
+              tooltipText: root.showTooltip ? root.toplevelTitle(iconButton.modelData) + "\nClick: focus · Right-click: move / close" : ""
+              onPressed: function (button) {
+                if (button === Qt.RightButton) root.openWindowMenu(iconButton.modelData, iconButton)
+                else if (button === Qt.MiddleButton) root.closeWindow(iconButton.modelData)
+                else root.focusWindow(iconButton.modelData)
+              }
+              onWheelMoved: function (delta) { root.handleWheel(delta) }
+            }
+          }
+
+          WidgetButton {
+            bar: root.bar
+            visible: pill.extra > 0
+            text: "+" + pill.extra
+            fontSize: Style.font.caption
+            horizontalMargin: root.iconMargin
+            fixedHeight: root.vertical ? -1 : root.pillHeight
+            fixedWidth: root.vertical ? root.pillHeight : -1
+            active: pill.focused && !pill.urgent
+            activeColor: root.accentColor
+            onPressed: function (button) { root.focusWorkspace(pill.modelData) }
+            onWheelMoved: function (delta) { root.handleWheel(delta) }
+          }
+
+          // Keeps a little breathing room after the last icon so the pill's
+          // rounded end doesn't crowd the glyph.
+          Item {
+            visible: pill.shownTops.length > 0 && !root.vertical
+            width: Style.space(3)
+            height: 1
+          }
+        }
+      }
+    }
+
+    Repeater {
+      model: root.specialWorkspaces()
+
+      Rectangle {
+        id: specialPill
+        required property var modelData
+
+        readonly property bool shown: root.activeSpecialName === String(specialPill.modelData.name)
+        readonly property string label: String(specialPill.modelData.name).replace(/^special:/, "")
+        readonly property int count: root.toplevelsOf(specialPill.modelData).length
+
+        implicitWidth: root.vertical ? root.pillHeight : specialButton.implicitWidth
+        implicitHeight: root.vertical ? specialButton.implicitHeight : root.pillHeight
+        radius: root.compact ? Style.space(6) : Style.space(8)
+        color: specialPill.shown ? Util.alpha(root.accentColor, 0.22) : (specialHover.hovered ? Util.alpha(root.fgColor, 0.08) : "transparent")
+        border.color: Util.alpha(root.fgColor, specialPill.shown ? 0 : 0.18)
+        border.width: 1
+
+        Behavior on color { ColorAnimation { duration: 120 } }
+
+        HoverHandler { id: specialHover }
+
+        WidgetButton {
+          id: specialButton
+          anchors.centerIn: parent
+          bar: root.bar
+          text: "󰌨 " + specialPill.count
+          fontSize: root.vertical ? Style.font.caption : Style.font.body
+          horizontalMargin: root.numberMargin
+          fixedHeight: root.vertical ? -1 : root.pillHeight
+          fixedWidth: root.vertical ? root.pillHeight : -1
+          active: specialPill.shown
+          activeColor: root.accentColor
+          tooltipText: root.showTooltip ? "Special workspace: " + specialPill.label + "\n" + root.windowTitles(specialPill.modelData) + "\nClick: show / hide" : ""
+          onPressed: function (button) { root.toggleSpecial(specialPill.modelData) }
+        }
+      }
+    }
+
+    WidgetButton {
+      id: profilesButton
+      visible: root.showProfiles
+      bar: root.bar
+      text: "󰕰"
+      fontSize: Style.font.icon
+      horizontalMargin: root.numberMargin
+      fixedHeight: root.vertical ? -1 : root.pillHeight
+      fixedWidth: root.vertical ? root.pillHeight : -1
+      active: root.popupMode === "profiles"
+      activeColor: root.accentColor
+      tooltipText: root.showTooltip ? "Workspace profiles" : ""
+      onPressed: function (button) {
+        if (root.popupMode === "profiles") root.closePopup("profiles")
+        else {
+          profilesPanel.reset()
+          root.openPopup("profiles", profilesButton)
         }
       }
     }
   }
 
-  // Right-click any pill to open this: an editor for the icon-overrides
-  // file (see iconOverridesEffectivePath above) so adding or fixing an
-  // icon doesn't require hand-editing JSON. The app picker below is
-  // sourced live from currently open windows purely as a convenience for
-  // filling in the pattern field — the field itself stays a free-text
-  // regex input, so a picked value can still be broadened (e.g. trimmed
-  // down to `firefox` to match every Firefox variant) before saving.
+  // ------------------------------------------------------------ profiles UI
+  PopupCard {
+    id: profilesPopup
+    anchorItem: root.popupMode === "profiles" && root.popupAnchor ? root.popupAnchor : root
+    bar: root.bar
+    open: root.popupMode === "profiles"
+    contentWidth: fittedContentWidth(Style.space(340))
+    contentHeight: fittedContentHeight(profilesPanel.implicitHeight, Style.space(560))
+
+    function close() { root.closePopup("profiles") }
+
+    Flickable {
+      anchors.fill: parent
+      contentHeight: profilesPanel.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+
+      ProfilesPanel {
+        id: profilesPanel
+        width: parent.width
+        widget: root
+      }
+    }
+  }
+
+  // ----------------------------------------------------------- window menu
+  PopupCard {
+    id: windowMenu
+    anchorItem: root.popupMode === "window" && root.popupAnchor ? root.popupAnchor : root
+    bar: root.bar
+    open: root.popupMode === "window" && root.menuToplevel !== null
+    contentWidth: fittedContentWidth(Style.space(260))
+    contentHeight: fittedContentHeight(windowMenuColumn.implicitHeight, Style.space(420))
+
+    function close() { root.closePopup("window") }
+
+    readonly property var toplevel: root.menuToplevel
+    readonly property int currentWorkspace: toplevel && toplevel.workspace ? toplevel.workspace.id : -1
+
+    Column {
+      id: windowMenuColumn
+      anchors.fill: parent
+      spacing: Style.spacing.sm
+
+      Text {
+        width: parent.width
+        text: windowMenu.toplevel ? root.iconForToplevel(windowMenu.toplevel) + "  " + root.toplevelTitle(windowMenu.toplevel) : ""
+        color: root.fgColor
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.subtitle
+        font.bold: true
+        elide: Text.ElideRight
+      }
+
+      Text {
+        width: parent.width
+        text: windowMenu.toplevel ? root.toplevelClass(windowMenu.toplevel) : ""
+        color: Util.alpha(root.fgColor, 0.6)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
+      }
+
+      PanelSeparator { width: parent.width; foreground: root.fgColor }
+
+      Text {
+        text: "Move to workspace"
+        color: Util.alpha(root.fgColor, 0.6)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Flow {
+        width: parent.width
+        spacing: Style.space(4)
+
+        Repeater {
+          model: root.maxWorkspaceId
+
+          Button {
+            required property int index
+            readonly property int targetId: index + 1
+            text: targetId === 10 ? "0" : String(targetId)
+            bordered: true
+            selected: targetId === windowMenu.currentWorkspace
+            foreground: root.fgColor
+            enabled: targetId !== windowMenu.currentWorkspace
+            onClicked: {
+              root.moveWindowToWorkspace(root.windowAddress(windowMenu.toplevel), targetId)
+              root.closePopup("window")
+            }
+          }
+        }
+      }
+
+      PanelSeparator { width: parent.width; foreground: root.fgColor }
+
+      Button {
+        width: parent.width
+        leftAlign: true
+        iconText: "󰁕"
+        text: "Focus window"
+        foreground: root.fgColor
+        onClicked: { root.focusWindow(windowMenu.toplevel); root.closePopup("window") }
+      }
+
+      Button {
+        width: parent.width
+        leftAlign: true
+        iconText: "󰏫"
+        text: "Icon rule for this app…"
+        foreground: root.fgColor
+        onClicked: root.openRulesEditor(root.toplevelClass(windowMenu.toplevel))
+      }
+
+      Button {
+        width: parent.width
+        leftAlign: true
+        iconText: "󰅖"
+        text: "Close window"
+        foreground: Color.urgent
+        onClicked: { root.closeWindow(windowMenu.toplevel); root.closePopup("window") }
+      }
+    }
+  }
+
+  // -------------------------------------------------------- workspace menu
+  PopupCard {
+    id: workspaceMenu
+    anchorItem: root.popupMode === "workspace" && root.popupAnchor ? root.popupAnchor : root
+    bar: root.bar
+    open: root.popupMode === "workspace"
+    contentWidth: fittedContentWidth(Style.space(260))
+    contentHeight: fittedContentHeight(workspaceMenuColumn.implicitHeight, Style.space(320))
+
+    function close() { root.closePopup("workspace") }
+
+    Column {
+      id: workspaceMenuColumn
+      anchors.fill: parent
+      spacing: Style.spacing.md
+
+      Text {
+        text: "WORKSPACE " + (root.menuWorkspaceId === 10 ? 0 : root.menuWorkspaceId)
+        color: root.fgColor
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.subtitle
+        font.bold: true
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.spacing.controlGap
+
+        TextField {
+          id: workspaceNameField
+          width: parent.width - saveNameButton.width - parent.spacing
+          placeholderText: "Name, e.g. web"
+          foreground: root.fgColor
+          onAccepted: { root.setWorkspaceName(root.menuWorkspaceId, text); root.closePopup("workspace") }
+        }
+
+        Button {
+          id: saveNameButton
+          text: "Save"
+          bordered: true
+          foreground: root.fgColor
+          onClicked: { root.setWorkspaceName(root.menuWorkspaceId, workspaceNameField.text); root.closePopup("workspace") }
+        }
+      }
+
+      Button {
+        visible: root.workspaceName(root.menuWorkspaceId) !== ""
+        width: parent.width
+        leftAlign: true
+        iconText: "󰅖"
+        text: "Clear name"
+        foreground: root.fgColor
+        onClicked: { root.setWorkspaceName(root.menuWorkspaceId, ""); root.closePopup("workspace") }
+      }
+
+      Button {
+        width: parent.width
+        leftAlign: true
+        iconText: "󰏫"
+        text: "Icon rules…"
+        foreground: root.fgColor
+        onClicked: {
+          var tops = root.toplevelsOf(root.workspaceById(root.menuWorkspaceId))
+          root.openRulesEditor(tops.length > 0 ? root.toplevelClass(tops[0]) : "")
+        }
+      }
+    }
+  }
+
+  // --------------------------------------------------------- icon rules UI
+  // An editor for the icon-overrides file so adding or fixing an icon doesn't
+  // require hand-editing JSON. The app picker only fills the pattern field,
+  // which stays a free-text regex so a pick can be broadened before saving.
   PopupCard {
     id: rulesPopup
     anchorItem: root
     bar: root.bar
-    owner: root
-    open: root.rulesEditorOpen
+    open: root.popupMode === "rules"
     contentWidth: fittedContentWidth(Style.space(320))
     contentHeight: fittedContentHeight(rulesColumn.implicitHeight, Style.space(420))
 
-    function close() { root.rulesEditorOpen = false }
+    function close() { root.closePopup("rules") }
 
     onOpenChanged: if (open) {
       patternField.text = root.rulesEditorPrefill
@@ -460,17 +1146,17 @@ BarWidget {
 
       Text {
         text: "ICON RULES"
-        color: root.bar ? root.bar.barForeground : Color.foreground
-        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+        color: root.fgColor
+        font.family: root.fontFamily
         font.pixelSize: Style.font.subtitle
         font.bold: true
       }
 
       Text {
         width: parent.width
-        text: "Pick an open app (or type your own pattern below), paste an icon, and add it. Saved to " + root.iconOverridesEffectivePath + " and applied immediately."
-        color: Qt.darker(root.bar ? root.bar.barForeground : Color.foreground, 1.4)
-        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+        text: "Pick an open app (or type your own pattern below), paste an icon, and add it. Saved to " + iconOverridesFile.path + " and applied immediately."
+        color: Util.alpha(root.fgColor, 0.6)
+        font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
       }
@@ -479,7 +1165,7 @@ BarWidget {
         id: appPicker
         width: parent.width
         showLabel: false
-        options: root.rulesEditorOpen ? root.openAppOptions() : []
+        options: root.popupMode === "rules" ? root.openAppOptions() : []
         onChanged: function (v) { patternField.text = v }
       }
 
@@ -503,7 +1189,7 @@ BarWidget {
           id: addButton
           text: "Add"
           bordered: true
-          foreground: root.bar ? root.bar.barForeground : Color.foreground
+          foreground: root.fgColor
           onClicked: {
             if (root.addIconOverride(patternField.text, iconField.text)) {
               patternField.text = ""
@@ -515,14 +1201,14 @@ BarWidget {
       }
 
       PanelSeparator {
-        foreground: root.bar ? root.bar.barForeground : Color.foreground
+        foreground: root.fgColor
       }
 
       Text {
         visible: root.iconOverrideEntries.length === 0
         text: "No custom rules yet."
-        color: Qt.darker(root.bar ? root.bar.barForeground : Color.foreground, 1.4)
-        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+        color: Util.alpha(root.fgColor, 0.6)
+        font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }
 
@@ -542,8 +1228,8 @@ BarWidget {
             Text {
               width: parent.width - removeButton.width - parent.spacing
               text: modelData.icon + "  " + modelData.match
-              color: root.bar ? root.bar.barForeground : Color.foreground
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              color: root.fgColor
+              font.family: root.fontFamily
               font.pixelSize: Style.font.body
               elide: Text.ElideRight
             }
@@ -551,7 +1237,7 @@ BarWidget {
             Button {
               id: removeButton
               text: "✕"
-              foreground: root.bar ? root.bar.barForeground : Color.foreground
+              foreground: root.fgColor
               onClicked: root.removeIconOverride(index)
             }
           }

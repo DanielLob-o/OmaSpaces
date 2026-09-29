@@ -1,6 +1,6 @@
 # Omaspaces
 
-Configurable Hyprland workspace indicators for the [Omarchy](https://omarchy.org/) bar: each pill shows the workspace number plus a glyph for every open window's app, with layout, sizing, and icon rules you control.
+Configurable Hyprland workspace indicators for the [Omarchy](https://omarchy.org/) bar: each pill shows the workspace number (and an optional name) plus a clickable glyph for every open window's app. Right-click to move or close windows, and save app layouts as **profiles** you can relaunch in one click.
 
 ![preview](preview.png)
 
@@ -8,11 +8,18 @@ Configurable Hyprland workspace indicators for the [Omarchy](https://omarchy.org
 
 - **Pills** — one per workspace, numbered, holding a small glyph for each open
   window's app (capped, with a `+N` overflow past the limit).
-- **Active state** — the focused (or urgent) workspace gets a soft background
-  fill in your accent color; nothing else changes shape.
-- **Click** a pill to focus that workspace; **scroll** over any pill to step
-  to the next/previous one; **hover** for a tooltip listing that workspace's
-  open window titles; **right-click** to open the icon rules editor.
+- **Active state** — the workspace shown on that bar's monitor gets a soft
+  background fill in your accent color; urgent workspaces get a red fill.
+- **Workspace number** — click to focus the workspace; right-click to name
+  it (e.g. `1 dev`) or open the icon rules editor.
+- **App icons** — click an icon to focus that exact window; right-click it
+  for a menu to move it to another workspace, close it, or add an icon rule
+  for its app; middle-click closes it.
+- **Scroll** over the pills to step through open workspaces, one step per
+  wheel notch (touchpads are smoothed so a swipe doesn't fly past several).
+- **Special workspaces** — a scratchpad that holds windows gets its own
+  outlined pill with a window count; click it to show or hide it.
+- **Profiles button** — opens [workspace profiles](#workspace-profiles).
 
 ## Requirements
 
@@ -56,22 +63,38 @@ omarchy bar set lobo.omaspaces workspaceCount 6 --json
 | Highest workspace shown | `maxWorkspaceId` | Ceiling for extra workspaces that appear once occupied |
 | Hide empty extra workspaces | `hideEmpty` | Drop (rather than dim) empty workspaces above the base count |
 | Max icons per workspace | `iconLimit` | Caps icons per pill before collapsing into a `+N` |
-| Active color | `accentSource` | `Accent`, `Urgent`, or `Foreground` palette role, shown as a soft background fill on the focused (or urgent) workspace |
+| Active color | `accentSource` | `Accent`, `Urgent`, or `Foreground` palette role, shown as a soft background fill on the active workspace (urgent workspaces are always red) |
 | Compact spacing | `compact` | Tighter padding/gaps between pills |
-| Show window titles on hover | `showTooltip` | Tooltip listing the pill's open window titles |
+| Show tooltips | `showTooltip` | Hover tooltips: a workspace number lists its window titles, an app icon shows its window's title |
 | Custom icon rules file | `iconOverridesPath` | Path to the JSON file the icon rules editor (below) reads and writes; defaults to `~/.config/omarchy/omaspaces-icons.json` |
+| Show special workspaces | `showSpecial` | Pill for each non-empty special (scratchpad) workspace |
+| Show profiles button | `showProfiles` | The button that opens workspace profiles |
+| Workspace names | `workspaceNames` | Object mapping workspace id to a name, e.g. `{"1": "dev"}`; editable by right-clicking a number |
+| Profiles file | `profilesPath` | Where profiles are stored; defaults to `~/.config/omarchy/omaspaces-profiles.json` |
+
+Workspace names can also be set from the command line:
+
+```sh
+omarchy bar set lobo.omaspaces workspaceNames '{"1": "dev", "3": "chat"}' --json
+```
+
+## Icons
 
 ### Built-in icon rules
 
 App-to-icon rules live in `IconRules.js`, split into a small `titleRules`
-list (for apps that need a window title to disambiguate, like browser tabs)
-and a larger `classRules` list (matched and cached by window class). Add or
-reorder entries there and save; the shell hot-reloads plugin QML on change.
+list and a larger `classRules` list (matched and cached by window class).
+Title rules only apply to browser windows, where the class alone can't tell
+tabs and web apps apart; a terminal whose title mentions "github" keeps its
+terminal icon. Add or reorder entries there and save; the shell hot-reloads
+plugin QML on change.
 
 ### Adding your own icons
 
-**Right-click any workspace pill** to open the icon rules editor — no file
-editing required:
+Open the icon rules editor from the bar, no file editing required:
+right-click an app icon and choose **Icon rule for this app…** (the pattern
+comes prefilled with that app's class), or right-click a workspace number
+and choose **Icon rules…**. Then:
 
 1. Pick an app from the dropdown (populated from your currently open
    windows), or just type a pattern by hand.
@@ -110,6 +133,43 @@ If a window's class isn't obvious from the app picker, find it with:
 ```sh
 hyprctl clients | grep -A2 'class:'
 ```
+
+## Workspace profiles
+
+A profile is a saved app layout, such as "At Work" or "At Home", listing
+which apps go on which workspace. Click the profiles button at the end of
+the pills to open them.
+
+- **Capture the current layout** saves every open window's app and
+  workspace as a new profile.
+- **Click a profile** to apply it. Apps that are already open are left
+  where they are; only the missing ones are launched, and each new window is
+  moved onto its saved workspace as it appears. The status line reports how
+  many were opened.
+- **The gear** opens an editor: rename the profile, move each app to a
+  different workspace with `‹ ›`, remove apps, add an app that's open right
+  now, recapture the layout, or delete the profile.
+- **+** creates an empty profile to fill in through the editor.
+
+Launch commands are worked out when you capture: the app's desktop entry
+when it has one (Omarchy web apps like WhatsApp included), otherwise the
+process's own command line. Profiles live in a plain JSON file you can
+edit by hand:
+
+```json
+[
+  {
+    "name": "At Work",
+    "apps": [
+      { "class": "brave-browser", "workspace": 1, "command": "uwsm-app -- gtk-launch 'brave-browser.desktop'" },
+      { "class": "com.mitchellh.ghostty", "workspace": 2, "command": "uwsm-app -- gtk-launch 'com.mitchellh.ghostty.desktop'" }
+    ]
+  }
+]
+```
+
+`class` is matched against open windows (case-insensitive) to decide
+whether an app is already running.
 
 ## Removal
 

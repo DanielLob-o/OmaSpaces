@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "lobo.omaspaces",
   "name": "Omaspaces",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Daniel Lobo",
   "license": "MIT",
-  "description": "Configurable Hyprland workspace indicators with per-app window icons, adjustable layout, and an in-widget editor for your own icon rules.",
+  "description": "Configurable Hyprland workspace indicators with clickable per-window app icons, workspace names, scratchpad pills, and workspace profiles that relaunch your app layout.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Omaspaces",
-    "description": "Workspace indicators with per-app icons for open windows. Right-click a pill to add your own icon rules, plus layout and styling options.",
+    "description": "Workspace pills with clickable per-app icons. Right-click an icon to move or close its window, right-click a number to rename the workspace, and use the profiles button to save and restore app layouts.",
     "category": "Compositor",
     "allowMultiple": false,
     "defaultSection": "center",
@@ -28,7 +28,11 @@
       "accentSource": "Accent",
       "compact": false,
       "showTooltip": true,
-      "iconOverridesPath": "~/.config/omarchy/omaspaces-icons.json"
+      "iconOverridesPath": "~/.config/omarchy/omaspaces-icons.json",
+      "showSpecial": true,
+      "showProfiles": true,
+      "workspaceNames": {},
+      "profilesPath": "~/.config/omarchy/omaspaces-profiles.json"
     },
     "schema": [
       {
@@ -87,7 +91,11 @@
         "type": "enum",
         "label": "Active color",
         "description": "Palette role used to tint the active-workspace highlight.",
-        "options": ["Accent", "Urgent", "Foreground"],
+        "options": [
+          "Accent",
+          "Urgent",
+          "Foreground"
+        ],
         "defaultValue": "Accent"
       },
       {
@@ -110,6 +118,34 @@
         "label": "Custom icon rules file",
         "description": "Path to a JSON file of [{\"match\": \"regex\", \"icon\": \"glyph\"}, ...] rules, checked before the built-in icon list. Right-click any workspace pill to add rules through a UI instead of editing this file by hand. Supports ~ and $HOME. Reloads automatically when the file changes.",
         "defaultValue": "~/.config/omarchy/omaspaces-icons.json"
+      },
+      {
+        "key": "showSpecial",
+        "type": "boolean",
+        "label": "Show special workspaces",
+        "description": "Add a pill for each special (scratchpad) workspace that holds windows; click it to show or hide that workspace.",
+        "defaultValue": true
+      },
+      {
+        "key": "showProfiles",
+        "type": "boolean",
+        "label": "Show profiles button",
+        "description": "Show the button that opens workspace profiles: saved app layouts you can relaunch in one click.",
+        "defaultValue": true
+      },
+      {
+        "key": "workspaceNames",
+        "type": "object",
+        "label": "Workspace names",
+        "description": "Map of workspace id to a short name shown next to its number, e.g. {\"1\": \"dev\"}. Right-click a workspace number to edit it from the bar.",
+        "defaultValue": {}
+      },
+      {
+        "key": "profilesPath",
+        "type": "path",
+        "label": "Profiles file",
+        "description": "JSON file where workspace profiles are stored. Supports ~ and $HOME. Reloads automatically when the file changes.",
+        "defaultValue": "~/.config/omarchy/omaspaces-profiles.json"
       }
     ]
   }

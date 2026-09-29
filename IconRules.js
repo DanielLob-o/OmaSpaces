@@ -17,6 +17,10 @@
 
 var DEFAULT_ICON = "󰀻"
 
+// Title rules only disambiguate browser windows (tabs and web apps); a
+// terminal whose title mentions "github" should still look like a terminal.
+var titleRuleClasses = /firefox|librewolf|floorp|waterfox|zen|chrom|brave|edge|vivaldi|opera|helium|thorium/
+
 var titleRules = [
   { match: /youtube/, icon: "󰗃" },
   { match: /chatgpt/, icon: "󰭹" },
@@ -27,7 +31,7 @@ var titleRules = [
 
 var classRules = [
   // Terminals
-  { match: /^foot$/, icon: "󰆍" },
+  { match: /ghostty|alacritty|kitty|wezterm|^foot$|foot-?client|konsole|gnome-terminal|ptyxis/, icon: "\ue795" },
 
   // Browsers
   { match: /firefox|librewolf|floorp|waterfox|zen-browser|^zen$/, icon: "󰈹" },
@@ -67,8 +71,8 @@ var classRules = [
   { match: /^steam$/, icon: "󰓓" }
 ]
 
-function iconForTitle(title) {
-  if (!title) return ""
+function iconForTitle(title, cls) {
+  if (!title || !titleRuleClasses.test(cls || "")) return ""
   for (var i = 0; i < titleRules.length; i++) {
     if (titleRules[i].match.test(title)) return titleRules[i].icon
   }
