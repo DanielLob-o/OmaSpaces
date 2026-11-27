@@ -1,0 +1,53 @@
+{
+  "workspace.tooltip": "Workspace %1",
+  "workspace.tooltipNamed": "Workspace %1 · %2",
+  "workspace.tooltipHint": "Right-click: rename · icon rules",
+  "window.tooltipHint": "Click: focus · Right-click: move / close",
+  "special.tooltip": "Special workspace: %1",
+  "special.tooltipHint": "Click: show / hide",
+  "profiles.tooltip": "Workspace profiles",
+
+  "windowMenu.moveTo": "Move to workspace",
+  "windowMenu.focus": "Focus window",
+  "windowMenu.iconRule": "Icon rule for this app…",
+  "windowMenu.close": "Close window",
+
+  "workspaceMenu.title": "WORKSPACE %1",
+  "workspaceMenu.namePlaceholder": "Name, e.g. web",
+  "workspaceMenu.save": "Save",
+  "workspaceMenu.clearName": "Clear name",
+  "workspaceMenu.iconRules": "Icon rules…",
+
+  "rules.title": "ICON RULES",
+  "rules.help": "Pick an open app or type a pattern, paste an icon, and add it. Rules are saved to %1 and apply immediately.",
+  "rules.patternPlaceholder": "app pattern (regex), e.g. firefox|zen",
+  "rules.iconPlaceholder": "icon glyph",
+  "rules.add": "Add",
+  "rules.empty": "No custom rules yet.",
+
+  "profiles.newEmpty": "New empty profile",
+  "profiles.empty": "No profiles yet. Arrange your apps across workspaces, then capture the layout below.",
+  "profiles.profileEmpty": "Empty. Open the gear to add apps.",
+  "profiles.edit": "Edit profile",
+  "profiles.capture": "Capture the current layout",
+  "profiles.capturing": "Capturing…",
+  "profiles.defaultName": "Profile %1",
+  "profiles.defaultLayoutName": "Layout %1",
+
+  "editor.namePlaceholder": "Profile name",
+  "editor.rename": "Rename",
+  "editor.previousWorkspace": "Previous workspace",
+  "editor.nextWorkspace": "Next workspace",
+  "editor.removeApp": "Remove from profile",
+  "editor.add": "Add",
+  "editor.addHelp": "Adds the open app on its current workspace. Use ‹ › to change it.",
+  "editor.recapture": "Recapture layout",
+  "editor.recaptureTooltip": "Replace the apps in this profile with the apps open now",
+  "editor.delete": "Delete",
+
+  "status.captured": { "one": "Captured %1 app into %2", "other": "Captured %1 apps into %2" },
+  "status.recaptured": { "one": "Recaptured %2 · %1 app", "other": "Recaptured %2 · %1 apps" },
+  "status.readyOpened": { "one": "%2 ready · %1 opened", "other": "%2 ready · %1 opened" },
+  "status.readyAllOpen": "%1 ready · everything already open",
+  "status.noCommand": { "one": "%1 without a launch command", "other": "%1 without a launch command" }
+}

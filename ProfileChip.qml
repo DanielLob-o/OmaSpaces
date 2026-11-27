@@ -29,7 +29,7 @@ Item {
     border.color: Util.alpha(chip.foreground, 0.35)
     border.width: 1
 
-    Text {
+    PlainText {
       id: badge
       anchors.centerIn: parent
       text: String(chip.app.workspace === 10 ? 0 : chip.app.workspace)

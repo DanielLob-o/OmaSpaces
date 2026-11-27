@@ -26,18 +26,22 @@ A special workspace such as the scratchpad gets an outlined pill with its window
 
 ## Requirements
 
-- Omarchy (Quattro) on Hyprland
+- Omarchy 4.5 or later on Hyprland (tested on 4.5.0)
 - A Nerd Font set as the bar font
+
+With more than one monitor, Omaspaces does not yet follow Omarchy's per-monitor workspaces (1–10 on the first monitor, 11–20 on the second). Every bar shows workspaces 1–10.
 
 ## Installation
 
 ```sh
-omarchy plugin add https://github.com/DanielLob-o/Omaspaces.git --enable
-omarchy bar put lobo.omaspaces --section center
+omarchy plugin add https://github.com/DanielLob-o/Omaspaces.git
+omarchy bar put lobo.omaspaces --after omarchy.workspaces
 omarchy plugin disable omarchy.workspaces
 ```
 
-The last command removes the built-in workspaces widget so you don't get two.
+When `omarchy plugin add` asks to enable the plugin, answer no. The second command enables it and puts it next to the built-in workspaces widget. The last command removes the built-in widget so you don't get two.
+
+Don't put Omaspaces in the `center` section next to the clock, or the clock moves off center. Use `centerBegin` or `centerEnd` to keep it near the clock.
 
 ## Configuration
 
@@ -138,6 +142,12 @@ Profiles are saved to `~/.config/omarchy/omaspaces-profiles.json`:
 ```
 
 An app counts as already open when a window with the same `class` exists, ignoring case.
+
+## Translations
+
+Omaspaces follows the language set under Setup > Language and changes without a shell restart. The strings are in `i18n/en.json`. To add a language, copy that file to `i18n/<code>.json` (for example `de.json` or `pt-BR.json`) and translate the values. Keep the `%1` and `%2` placeholders. A string missing from a translation falls back to English.
+
+Strings that count something have one entry per plural form. English uses `one` and `other`. Other languages use the forms their plural rules need.
 
 ## Removal
 
