@@ -31,7 +31,7 @@ Column {
       id: title
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
-      text: "󰕰  OmaSpaces"
+      text: "󰕰  OmaSpaces" // i18n-ignore: brand name
       color: panel.foreground
       font.family: panel.fontFamily
       font.pixelSize: Style.font.title
