@@ -27,7 +27,7 @@ report = Report("compile qml")
 names = [path.relative_to(ROOT).as_posix() for path in runtime_files(".qml")]
 MARKUP = '<b>bold</b><img src="https://example.invalid/x.png">'
 
-with tempfile.TemporaryDirectory(prefix="omaspaces-qml-") as directory:
+with tempfile.TemporaryDirectory(prefix="plugin-qml-") as directory:
     config = Path(directory)
     for module in ("Commons", "Ui"):
         (config / module).symlink_to(HOST / module, target_is_directory=True)

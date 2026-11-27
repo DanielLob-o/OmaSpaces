@@ -2,7 +2,8 @@
 """Run the plugin's checks. See docs/testing.md.
 
     test/run.py                     portable checks: unit tests, lint, host API, docs, whitespace
-    test/run.py all                 portable checks, then the QML compile and plugin validation
+    test/run.py all                 portable checks, then the QML compile, plugin validation and,
+                                    for a plugin based on Omarchy's bar, the upstream drift check
     test/run.py --omarchy DIR ...   check against an Omarchy checkout instead of the installed one
 
 Nothing here changes the running shell, the bar, or the installed plugin.
@@ -77,6 +78,8 @@ def main():
     results = portable(omarchy)
     if args.mode == "all":
         results += [run("compile qml", [sys.executable, LINT / "compile-qml.py"]), validate(omarchy)]
+        if (LINT / "bar-upstream.py").exists():
+            results.append(run("omarchy bar drift", [sys.executable, LINT / "bar-upstream.py", *omarchy_args(omarchy)]))
     print(f"{sum(results)}/{len(results)} checks passed")
     raise SystemExit(0 if all(results) else 1)
 

@@ -32,6 +32,8 @@ Two files configure the host API check:
 - `test/host-objects.json` maps each object that Omarchy hands the plugin to the shell file that defines it. For Omaspaces, `bar` is `Ui/PluginBarApi.qml`.
 - `test/host-gaps.json` (optional) lists known gaps, each with a reason. A listed gap does not fail. A listed entry that is no longer a gap fails, so the list stays true.
 
+The lint scripts and `test/run.py` are the same files as in [Islands](https://github.com/DanielLob-o/Islands). When you change one, copy it to the other repository.
+
 Unit tests load the production functions out of `BarWidget.qml` and `IconRules.js` with `test/helpers/qml-functions.cjs`, and run them with fake inputs. Because they run the real function bodies, a change to the logic changes the test result.
 
 ## Continuous integration
