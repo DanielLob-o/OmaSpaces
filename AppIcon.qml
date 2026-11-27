@@ -28,7 +28,7 @@ Item {
     mipmap: true
   }
 
-  Text {
+  PlainText {
     anchors.fill: parent
     visible: !image.visible
     text: icon.widget ? icon.widget.iconForClass(icon.appClass, icon.title) : ""

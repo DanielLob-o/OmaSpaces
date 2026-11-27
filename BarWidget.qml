@@ -53,6 +53,18 @@ BarWidget {
     return Color.accent
   }
 
+  // Call tr() and trn() inside bindings so a language switch re-renders them.
+  readonly property Translations strings: Translations { directory: Qt.resolvedUrl("i18n") }
+
+  function tr(key) {
+    return root.strings.t(key)
+  }
+
+  // Fills %1 with the count; chain .arg() for %2 and later.
+  function trn(key, count) {
+    return root.strings.tn(key, count).arg(I18n.formatNumber(count))
+  }
+
   // Hyprland doesn't push workspace membership changes, so refresh toplevels on window events.
   Timer {
     id: refreshToplevelsTimer
@@ -176,21 +188,18 @@ BarWidget {
     root.dispatch("hl.dsp.workspace.toggle_special(" + root.luaString(name) + ")")
   }
 
-  // Accumulate deltas so a touchpad steps one workspace per notch, not one per event.
+  // A wheel notch moves one workspace, and a touchpad adds up its smaller deltas until they make a notch.
   property real wheelAccum: 0
 
   Timer { id: wheelResetTimer; interval: 300; onTriggered: root.wheelAccum = 0 }
-  Timer { id: wheelCooldown; interval: 140 }
 
   function handleWheel(delta) {
     if (!delta) return
-    root.wheelAccum += delta
+    var wheel = Util.wheelSteps(root.wheelAccum, delta)
+    root.wheelAccum = wheel.remainder
     wheelResetTimer.restart()
-    if (Math.abs(root.wheelAccum) < 120 || wheelCooldown.running) return
-    var step = root.wheelAccum > 0 ? 1 : -1
-    root.wheelAccum = 0
-    wheelCooldown.start()
-    root.dispatch("hl.dsp.focus({ workspace = " + root.luaString(step > 0 ? "e+1" : "e-1") + " })")
+    if (wheel.steps === 0) return
+    root.dispatch("hl.dsp.focus({ workspace = " + root.luaString(wheel.steps > 0 ? "e+1" : "e-1") + " })")
   }
 
   readonly property string home: Quickshell.env("HOME") || ""
@@ -352,10 +361,10 @@ BarWidget {
     if (!root.showTooltip) return ""
     var lines = []
     var name = root.workspaceName(id)
-    lines.push("Workspace " + id + (name ? " · " + name : ""))
+    lines.push(name ? root.tr("workspace.tooltipNamed").arg(id).arg(name) : root.tr("workspace.tooltip").arg(id))
     var titles = root.windowTitles(workspace)
     if (titles) lines.push(titles)
-    lines.push("Right-click: rename · icon rules")
+    lines.push(root.tr("workspace.tooltipHint"))
     return lines.join("\n")
   }
 
@@ -405,8 +414,22 @@ BarWidget {
   }
 
   property var profiles: []
-  property string profileStatus: ""
+  // Kept as data, not text, so the status line follows a language switch.
+  property var profileStatus: null
   property bool capturing: false
+
+  function profileStatusText() {
+    var s = root.profileStatus
+    if (!s) return ""
+    if (s.kind === "captured") return root.trn("status.captured", s.count).arg(s.name)
+    if (s.kind === "recaptured") return root.trn("status.recaptured", s.count).arg(s.name)
+    if (s.kind !== "ready") return ""
+    var text = s.launched > 0
+      ? root.trn("status.readyOpened", s.launched).arg(s.name)
+      : root.tr("status.readyAllOpen").arg(s.name)
+    if (s.skipped > 0) text += " · " + root.trn("status.noCommand", s.skipped)
+    return text
+  }
   property var pendingPlacements: []
 
   function normalizeProfiles(value) {
@@ -426,7 +449,7 @@ BarWidget {
           command: String(a.command || "")
         })
       }
-      out.push({ name: String(p.name || ("Profile " + (out.length + 1))), apps: apps })
+      out.push({ name: String(p.name || root.tr("profiles.defaultName").arg(out.length + 1)), apps: apps })
     }
     return out
   }
@@ -445,17 +468,18 @@ BarWidget {
     return JSON.parse(JSON.stringify(root.profiles))
   }
 
-  function uniqueProfileName(base) {
+  // Names are saved to the profiles file, so they keep the language they were made in.
+  function uniqueProfileName(key) {
     var names = root.profiles.map(function (p) { return p.name })
     for (var n = root.profiles.length + 1; ; n++) {
-      var candidate = base + " " + n
+      var candidate = root.tr(key).arg(n)
       if (names.indexOf(candidate) === -1) return candidate
     }
   }
 
   function newEmptyProfile() {
     var next = root.cloneProfiles()
-    next.push({ name: root.uniqueProfileName("Profile"), apps: [] })
+    next.push({ name: root.uniqueProfileName("profiles.defaultName"), apps: [] })
     root.saveProfiles(next)
     return next.length - 1
   }
@@ -506,9 +530,9 @@ BarWidget {
   function captureNewProfile(onCreated) {
     root.resolveApps(root.layoutToplevels(), function (apps) {
       var next = root.cloneProfiles()
-      next.push({ name: root.uniqueProfileName("Layout"), apps: apps })
+      next.push({ name: root.uniqueProfileName("profiles.defaultLayoutName"), apps: apps })
       root.saveProfiles(next)
-      root.profileStatus = "Captured " + apps.length + " app" + (apps.length === 1 ? "" : "s") + " into " + next[next.length - 1].name
+      root.profileStatus = { kind: "captured", count: apps.length, name: next[next.length - 1].name }
       if (onCreated) onCreated(next.length - 1)
     })
   }
@@ -519,7 +543,7 @@ BarWidget {
       if (!next[index]) return
       next[index].apps = apps
       root.saveProfiles(next)
-      root.profileStatus = "Recaptured " + next[index].name + " · " + apps.length + " apps"
+      root.profileStatus = { kind: "recaptured", count: apps.length, name: next[index].name }
     })
   }
 
@@ -675,9 +699,7 @@ BarWidget {
     }
     root.pendingPlacements = pending
 
-    var status = profile.name + " ready · " + (launched > 0 ? launched + " opened" : "everything already open")
-    if (skipped > 0) status += " · " + skipped + " without a launch command"
-    root.profileStatus = status
+    root.profileStatus = { kind: "ready", name: profile.name, launched: launched, skipped: skipped }
   }
 
   // Payload is "ADDRESS,WORKSPACE,CLASS,TITLE"; only the title can contain commas.
@@ -747,7 +769,7 @@ BarWidget {
           return pillHover.hovered ? Util.alpha(root.fgColor, 0.08) : "transparent"
         }
 
-        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on color { ColorAnimation { duration: Style.duration(120) } }
 
         HoverHandler { id: pillHover }
 
@@ -814,7 +836,7 @@ BarWidget {
               }
               active: pill.focused && !pill.urgent
               activeColor: root.accentColor
-              tooltipText: root.showTooltip ? root.toplevelTitle(iconButton.modelData) + "\nClick: focus · Right-click: move / close" : ""
+              tooltipText: root.showTooltip ? root.toplevelTitle(iconButton.modelData) + "\n" + root.tr("window.tooltipHint") : ""
               onPressed: function (button) {
                 if (button === Qt.RightButton) root.openWindowMenu(iconButton.modelData, iconButton)
                 else if (button === Qt.MiddleButton) root.closeWindow(iconButton.modelData)
@@ -865,7 +887,7 @@ BarWidget {
         border.color: Util.alpha(root.fgColor, specialPill.shown ? 0 : 0.18)
         border.width: 1
 
-        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on color { ColorAnimation { duration: Style.duration(120) } }
 
         HoverHandler { id: specialHover }
 
@@ -880,7 +902,7 @@ BarWidget {
           fixedWidth: root.vertical ? root.pillHeight : -1
           active: specialPill.shown
           activeColor: root.accentColor
-          tooltipText: root.showTooltip ? "Special workspace: " + specialPill.label + "\n" + root.windowTitles(specialPill.modelData) + "\nClick: show / hide" : ""
+          tooltipText: root.showTooltip ? root.tr("special.tooltip").arg(specialPill.label) + "\n" + root.windowTitles(specialPill.modelData) + "\n" + root.tr("special.tooltipHint") : ""
           onPressed: function (button) { root.toggleSpecial(specialPill.modelData) }
         }
       }
@@ -897,7 +919,7 @@ BarWidget {
       fixedWidth: root.vertical ? root.pillHeight : -1
       active: root.popupMode === "profiles"
       activeColor: root.accentColor
-      tooltipText: root.showTooltip ? "Workspace profiles" : ""
+      tooltipText: root.showTooltip ? root.tr("profiles.tooltip") : ""
       onPressed: function (button) {
         if (root.popupMode === "profiles") root.closePopup("profiles")
         else {
@@ -963,7 +985,7 @@ BarWidget {
           size: Style.space(20)
         }
 
-        Text {
+        PlainText {
           anchors.verticalCenter: parent.verticalCenter
           width: parent.width - windowMenuIcon.width - parent.spacing
           text: windowMenu.toplevel ? root.toplevelTitle(windowMenu.toplevel) : ""
@@ -975,7 +997,7 @@ BarWidget {
         }
       }
 
-      Text {
+      PlainText {
         width: parent.width
         text: windowMenu.toplevel ? root.toplevelClass(windowMenu.toplevel) : ""
         color: Util.alpha(root.fgColor, 0.6)
@@ -986,8 +1008,8 @@ BarWidget {
 
       PanelSeparator { width: parent.width; foreground: root.fgColor }
 
-      Text {
-        text: "Move to workspace"
+      PlainText {
+        text: root.tr("windowMenu.moveTo")
         color: Util.alpha(root.fgColor, 0.6)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -1022,7 +1044,7 @@ BarWidget {
         width: parent.width
         leftAlign: true
         iconText: "󰁕"
-        text: "Focus window"
+        text: root.tr("windowMenu.focus")
         foreground: root.fgColor
         onClicked: { root.focusWindow(windowMenu.toplevel); root.closePopup("window") }
       }
@@ -1031,7 +1053,7 @@ BarWidget {
         width: parent.width
         leftAlign: true
         iconText: "󰏫"
-        text: "Icon rule for this app…"
+        text: root.tr("windowMenu.iconRule")
         foreground: root.fgColor
         onClicked: root.openRulesEditor(root.toplevelClass(windowMenu.toplevel))
       }
@@ -1040,7 +1062,7 @@ BarWidget {
         width: parent.width
         leftAlign: true
         iconText: "󰅖"
-        text: "Close window"
+        text: root.tr("windowMenu.close")
         foreground: Color.urgent
         onClicked: { root.closeWindow(windowMenu.toplevel); root.closePopup("window") }
       }
@@ -1062,8 +1084,8 @@ BarWidget {
       anchors.fill: parent
       spacing: Style.spacing.md
 
-      Text {
-        text: "WORKSPACE " + (root.menuWorkspaceId === 10 ? 0 : root.menuWorkspaceId)
+      PlainText {
+        text: root.tr("workspaceMenu.title").arg(root.menuWorkspaceId === 10 ? 0 : root.menuWorkspaceId)
         color: root.fgColor
         font.family: root.fontFamily
         font.pixelSize: Style.font.subtitle
@@ -1077,14 +1099,14 @@ BarWidget {
         TextField {
           id: workspaceNameField
           width: parent.width - saveNameButton.width - parent.spacing
-          placeholderText: "Name, e.g. web"
+          placeholderText: root.tr("workspaceMenu.namePlaceholder")
           foreground: root.fgColor
           onAccepted: { root.setWorkspaceName(root.menuWorkspaceId, text); root.closePopup("workspace") }
         }
 
         Button {
           id: saveNameButton
-          text: "Save"
+          text: root.tr("workspaceMenu.save")
           bordered: true
           foreground: root.fgColor
           onClicked: { root.setWorkspaceName(root.menuWorkspaceId, workspaceNameField.text); root.closePopup("workspace") }
@@ -1096,7 +1118,7 @@ BarWidget {
         width: parent.width
         leftAlign: true
         iconText: "󰅖"
-        text: "Clear name"
+        text: root.tr("workspaceMenu.clearName")
         foreground: root.fgColor
         onClicked: { root.setWorkspaceName(root.menuWorkspaceId, ""); root.closePopup("workspace") }
       }
@@ -1105,7 +1127,7 @@ BarWidget {
         width: parent.width
         leftAlign: true
         iconText: "󰏫"
-        text: "Icon rules…"
+        text: root.tr("workspaceMenu.iconRules")
         foreground: root.fgColor
         onClicked: {
           var tops = root.toplevelsOf(root.workspaceById(root.menuWorkspaceId))
@@ -1136,17 +1158,17 @@ BarWidget {
       anchors.fill: parent
       spacing: Style.spacing.lg
 
-      Text {
-        text: "ICON RULES"
+      PlainText {
+        text: root.tr("rules.title")
         color: root.fgColor
         font.family: root.fontFamily
         font.pixelSize: Style.font.subtitle
         font.bold: true
       }
 
-      Text {
+      PlainText {
         width: parent.width
-        text: "Pick an open app (or type your own pattern below), paste an icon, and add it. Saved to " + iconOverridesFile.path + " and applied immediately."
+        text: root.tr("rules.help").arg(iconOverridesFile.path)
         color: Util.alpha(root.fgColor, 0.6)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -1164,7 +1186,7 @@ BarWidget {
       TextField {
         id: patternField
         width: parent.width
-        placeholderText: "app pattern (regex), e.g. firefox|zen"
+        placeholderText: root.tr("rules.patternPlaceholder")
       }
 
       Row {
@@ -1174,12 +1196,12 @@ BarWidget {
         TextField {
           id: iconField
           width: parent.width - addButton.width - parent.spacing
-          placeholderText: "icon glyph"
+          placeholderText: root.tr("rules.iconPlaceholder")
         }
 
         Button {
           id: addButton
-          text: "Add"
+          text: root.tr("rules.add")
           bordered: true
           foreground: root.fgColor
           onClicked: {
@@ -1196,9 +1218,9 @@ BarWidget {
         foreground: root.fgColor
       }
 
-      Text {
+      PlainText {
         visible: root.iconOverrideEntries.length === 0
-        text: "No custom rules yet."
+        text: root.tr("rules.empty")
         color: Util.alpha(root.fgColor, 0.6)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -1217,7 +1239,7 @@ BarWidget {
             width: rulesColumn.width
             spacing: Style.spacing.controlGap
 
-            Text {
+            PlainText {
               width: parent.width - removeButton.width - parent.spacing
               text: modelData.icon + "  " + modelData.match
               color: root.fgColor

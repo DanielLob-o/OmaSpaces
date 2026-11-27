@@ -15,6 +15,10 @@ Column {
 
   spacing: Style.spacing.md
 
+  function tr(key) {
+    return panel.widget ? panel.widget.tr(key) : key
+  }
+
   function reset() {
     panel.editingIndex = -1
   }
@@ -23,7 +27,7 @@ Column {
     width: panel.width
     height: Math.max(title.implicitHeight, addButton.implicitHeight)
 
-    Text {
+    PlainText {
       id: title
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
@@ -41,15 +45,15 @@ Column {
       text: "+"
       fontSize: Style.font.heading
       foreground: panel.foreground
-      tooltipText: "New empty profile"
+      tooltipText: panel.tr("profiles.newEmpty")
       onClicked: panel.editingIndex = panel.widget.newEmptyProfile()
     }
   }
 
-  Text {
+  PlainText {
     visible: panel.profiles.length === 0
     width: panel.width
-    text: "No profiles yet. Arrange your apps across workspaces, then capture the layout below."
+    text: panel.tr("profiles.empty")
     color: panel.muted
     font.family: panel.fontFamily
     font.pixelSize: Style.font.caption
@@ -75,7 +79,7 @@ Column {
         radius: Style.space(8)
         color: rowHover.hovered || entry.editing ? Util.alpha(panel.foreground, 0.07) : "transparent"
 
-        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on color { ColorAnimation { duration: Style.duration(120) } }
 
         HoverHandler { id: rowHover; cursorShape: Qt.PointingHandCursor }
 
@@ -96,7 +100,7 @@ Column {
             width: parent.width
             spacing: Style.space(8)
 
-            Text {
+            PlainText {
               id: indexLabel
               text: String(entry.index + 1)
               color: panel.muted
@@ -104,7 +108,7 @@ Column {
               font.pixelSize: Style.font.subtitle
             }
 
-            Text {
+            PlainText {
               width: parent.width - indexLabel.width - parent.spacing
               text: entry.modelData.name
               color: panel.foreground
@@ -129,9 +133,9 @@ Column {
             }
           }
 
-          Text {
+          PlainText {
             visible: entry.modelData.apps.length === 0
-            text: "Empty. Open the gear to add apps."
+            text: panel.tr("profiles.profileEmpty")
             color: panel.muted
             font.family: panel.fontFamily
             font.pixelSize: Style.font.caption
@@ -146,7 +150,7 @@ Column {
           text: "\uf013"
           fontSize: Style.font.icon
           foreground: entry.editing ? Color.accent : panel.muted
-          tooltipText: "Edit profile"
+          tooltipText: panel.tr("profiles.edit")
           onClicked: panel.editingIndex = entry.editing ? -1 : entry.index
         }
       }
@@ -173,17 +177,17 @@ Column {
   Button {
     width: panel.width
     leftAlign: true
-    text: panel.widget && panel.widget.capturing ? "Capturing…" : "Capture the current layout"
+    text: panel.widget && panel.widget.capturing ? panel.tr("profiles.capturing") : panel.tr("profiles.capture")
     iconText: "󰄀"
     foreground: panel.foreground
     enabled: !(panel.widget && panel.widget.capturing)
     onClicked: panel.widget.captureNewProfile(function(index) { panel.editingIndex = index })
   }
 
-  Text {
+  PlainText {
     visible: text !== ""
     width: panel.width
-    text: panel.widget ? panel.widget.profileStatus : ""
+    text: panel.widget ? panel.widget.profileStatusText() : ""
     color: panel.muted
     font.family: panel.fontFamily
     font.pixelSize: Style.font.caption

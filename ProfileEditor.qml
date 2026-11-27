@@ -21,6 +21,14 @@ Rectangle {
   border.color: Util.alpha(foreground, 0.14)
   border.width: 1
 
+  // The popup mirrors the stepper in right-to-left languages, so the arrows swap to keep pointing outward.
+  readonly property string previousGlyph: I18n.rightToLeft ? "›" : "‹"
+  readonly property string nextGlyph: I18n.rightToLeft ? "‹" : "›"
+
+  function tr(key) {
+    return editor.widget ? editor.widget.tr(key) : key
+  }
+
   Component.onCompleted: nameField.text = editor.profile.name
 
   Column {
@@ -38,14 +46,14 @@ Rectangle {
       TextField {
         id: nameField
         width: parent.width - renameButton.width - parent.spacing
-        placeholderText: "Profile name"
+        placeholderText: editor.tr("editor.namePlaceholder")
         foreground: editor.foreground
         onAccepted: editor.widget.renameProfile(editor.profileIndex, text)
       }
 
       Button {
         id: renameButton
-        text: "Rename"
+        text: editor.tr("editor.rename")
         bordered: true
         foreground: editor.foreground
         onClicked: editor.widget.renameProfile(editor.profileIndex, nameField.text)
@@ -76,7 +84,7 @@ Rectangle {
             size: Style.space(18)
           }
 
-          Text {
+          PlainText {
             id: appLabel
             anchors.left: appRowIcon.right
             anchors.leftMargin: Style.space(8)
@@ -97,13 +105,13 @@ Rectangle {
             spacing: 0
 
             Button {
-              text: "‹"
+              text: editor.previousGlyph
               foreground: editor.muted
-              tooltipText: "Previous workspace"
+              tooltipText: editor.tr("editor.previousWorkspace")
               onClicked: editor.widget.setProfileAppWorkspace(editor.profileIndex, appRow.index, appRow.modelData.workspace - 1)
             }
 
-            Text {
+            PlainText {
               anchors.verticalCenter: parent.verticalCenter
               width: Style.space(22)
               horizontalAlignment: Text.AlignHCenter
@@ -114,9 +122,9 @@ Rectangle {
             }
 
             Button {
-              text: "›"
+              text: editor.nextGlyph
               foreground: editor.muted
-              tooltipText: "Next workspace"
+              tooltipText: editor.tr("editor.nextWorkspace")
               onClicked: editor.widget.setProfileAppWorkspace(editor.profileIndex, appRow.index, appRow.modelData.workspace + 1)
             }
           }
@@ -127,7 +135,7 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             text: "✕"
             foreground: editor.muted
-            tooltipText: "Remove from profile"
+            tooltipText: editor.tr("editor.removeApp")
             onClicked: editor.widget.removeProfileApp(editor.profileIndex, appRow.index)
           }
         }
@@ -147,7 +155,7 @@ Rectangle {
 
       Button {
         id: addButton
-        text: "Add"
+        text: editor.tr("editor.add")
         bordered: true
         foreground: editor.foreground
         enabled: appPicker.value !== ""
@@ -158,9 +166,9 @@ Rectangle {
       }
     }
 
-    Text {
+    PlainText {
       width: parent.width
-      text: "Adds the open app on its current workspace; use ‹ › to change it."
+      text: editor.tr("editor.addHelp")
       color: editor.muted
       font.family: editor.fontFamily
       font.pixelSize: Style.font.caption
@@ -171,16 +179,16 @@ Rectangle {
       spacing: Style.spacing.controlGap
 
       Button {
-        text: "Recapture layout"
+        text: editor.tr("editor.recapture")
         iconText: "󰑐"
         bordered: true
         foreground: editor.foreground
-        tooltipText: "Replace this profile's apps with what's open now"
+        tooltipText: editor.tr("editor.recaptureTooltip")
         onClicked: editor.widget.recaptureProfile(editor.profileIndex)
       }
 
       Button {
-        text: "Delete"
+        text: editor.tr("editor.delete")
         iconText: "󰆴"
         bordered: true
         foreground: Color.urgent
