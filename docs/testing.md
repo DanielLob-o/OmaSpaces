@@ -19,13 +19,18 @@ The script finds `test/unit/*.test.*` by file name, so a new test file joins the
 | Check | File | What it proves | What it does not prove |
 | --- | --- | --- | --- |
 | Unit tests | `test/unit/` | The logic in the real QML and JS functions: settings, icon rules, profiles, status text | QML bindings, rendering, Hyprland |
-| QML rules | `test/lint/qml-rules.py` | Plain-text sinks, `Style.duration()`, no Omarchy catalog keys, no hard-coded words | That the text reads well |
+| QML rules | `test/lint/qml-rules.py` | Plain-text sinks, `Style.duration()`, no ease-in or bounce curves, no Omarchy catalog keys, no hard-coded words | That the text reads well |
 | i18n | `test/lint/i18n.py` | Every catalog key exists and is used, language codes, placeholders, plural forms | That a translation is correct |
 | Manifest | `test/lint/manifest.py` | Versions agree with `CHANGELOG.md`, defaults agree with the schema, every setting is read and documented | That a setting works |
 | Docs | `test/lint/docs.py` | Relative links and `#anchors` in Markdown resolve | That a document is true |
 | Host API | `test/lint/host-api.py` | Every Omarchy module, type, property, singleton member, `bar` member and `omarchy-*` command the plugin uses exists | Behavior of those APIs |
 | QML compile | `test/lint/compile-qml.py` | Every QML file compiles against the installed shell, and `PlainText` keeps markup as plain text | Rendering, runtime errors |
 | Plugin validation | `omarchy-plugin-validate` | The exported plugin passes Omarchy's own validator | Anything at runtime |
+
+Two files configure the host API check:
+
+- `test/host-objects.json` maps each object that Omarchy hands the plugin to the shell file that defines it. For Omaspaces, `bar` is `Ui/PluginBarApi.qml`.
+- `test/host-gaps.json` (optional) lists known gaps, each with a reason. A listed gap does not fail. A listed entry that is no longer a gap fails, so the list stays true.
 
 Unit tests load the production functions out of `BarWidget.qml` and `IconRules.js` with `test/helpers/qml-functions.cjs`, and run them with fake inputs. Because they run the real function bodies, a change to the logic changes the test result.
 
