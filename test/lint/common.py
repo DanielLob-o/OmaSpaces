@@ -1,6 +1,7 @@
 """Shared helpers for the lint checks. Standard library only, so CI needs no installs."""
 from pathlib import Path
 import json
+import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,14 +26,20 @@ def manifest(root=ROOT):
 def code_only(source, keep_strings=True):
     """Blank out comments, and string contents when keep_strings is False.
 
-    Line numbers stay the same because newlines are kept. Regex literals are
-    not parsed; keep quotes out of them.
+    Line numbers stay the same because newlines are kept. Regex literals count
+    as strings, so a quote or brace in /'/g does not start a string or a block.
     """
     out = []
     i, n = 0, len(source)
     while i < n:
         c = source[i]
-        if source.startswith("//", i):
+        regex_end = _regex_end(source, i, "".join(out[-40:])) if c == "/" else None
+        if regex_end:
+            literal = source[i:regex_end]
+            body = literal.rfind("/")
+            out.append(literal if keep_strings else "/" + " " * (body - 1) + literal[body:])
+            i = regex_end
+        elif source.startswith("//", i):
             end = source.find("\n", i)
             end = n if end == -1 else end
             out.append(" " * (end - i))
@@ -53,6 +60,34 @@ def code_only(source, keep_strings=True):
             out.append(c)
             i += 1
     return "".join(out)
+
+
+def _regex_end(source, i, before):
+    """The end of a regex literal that starts at i, or None for a division or comment."""
+    if source.startswith("//", i) or source.startswith("/*", i):
+        return None
+    previous = before.rstrip()
+    if previous and previous[-1] not in "(,=:[!&|?{};+-*%~^<>" and not re.search(r"\b(return|typeof)$", previous):
+        return None
+    j, in_class, n = i + 1, False, len(source)
+    while j < n:
+        ch = source[j]
+        if ch == "\n":
+            return None
+        if ch == "\\":
+            j += 2
+            continue
+        if ch == "[":
+            in_class = True
+        elif ch == "]":
+            in_class = False
+        elif ch == "/" and not in_class:
+            j += 1
+            while j < n and source[j].isalpha():
+                j += 1
+            return j
+        j += 1
+    return None
 
 
 def block_at(source, open_index):

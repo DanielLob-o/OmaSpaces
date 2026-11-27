@@ -8,8 +8,15 @@ something that tree does not have:
 - a type, for every capitalized type that is not local and not a known Qt type,
 - a property, signal handler, or member it uses on an Omarchy type,
 - a member of an Omarchy singleton (Style.duration, Util.wheelSteps, ...),
-- a member of the `bar` object a bar widget gets (Ui/PluginBarApi.qml),
+- a member of an object Omarchy hands the plugin, as test/host-objects.json maps
+  them (for a bar widget, `bar` is Ui/PluginBarApi.qml), unless the code guards it
+  with `typeof x.member` or `"member" in x`,
+- for a full bar (kind "bar"): a property Omarchy sets on the bar, or a member it
+  reads or calls on it (shell.qml: configureBar and shell.bar.*),
 - an omarchy-* command it runs.
+
+test/host-gaps.json lists known gaps, as {"bar.name": "why"}: those do not fail, and an
+entry that is no longer a gap fails, so the list stays true.
 
 It runs without a desktop, so CI can point it at any Omarchy checkout:
 
@@ -18,6 +25,7 @@ It runs without a desktop, so CI can point it at any Omarchy checkout:
 """
 from pathlib import Path
 import argparse
+import json
 import re
 
 from common import ROOT, Report, block_at, code_only, line_of, manifest, runtime_files
@@ -41,7 +49,9 @@ QT_TYPES = {
     "MouseArea", "HoverHandler", "TapHandler", "WheelHandler", "Timer", "Connections", "Flickable",
     "Behavior", "ColorAnimation", "NumberAnimation", "QtObject", "Process", "StdioCollector",
     "FileView", "ShellRoot", "Variants", "PopupWindow", "PanelWindow", "GridLayout", "RowLayout",
-    "ColumnLayout",
+    "ColumnLayout", "Component", "SplitParser", "Region", "IpcHandler", "Scope", "LazyLoader",
+    "Instantiator", "SequentialAnimation", "ParallelAnimation", "PauseAnimation", "PropertyAnimation",
+    "ScriptAction", "DragHandler", "PointHandler", "DropArea", "Canvas",
 }
 
 # Members of the Qt base types that Omarchy components are built on.
@@ -146,9 +156,37 @@ def unknown_base(members):
 
 
 local_types = {path.stem for path in runtime_files(".qml")}
-is_bar_widget = "bar-widget" in manifest().get("kinds", [])
-bar_api = SHELL / "Ui" / "PluginBarApi.qml"
-bar_members = declared(code_only(bar_api.read_text())) if bar_api.is_file() else set()
+for path in runtime_files(".qml"):
+    local_types.update(re.findall(r"^\s*component\s+(\w+)\s*:", path.read_text(), re.M))
+
+# Objects Omarchy hands the plugin: variable name -> the shell file that defines it.
+objects_file = ROOT / "test" / "host-objects.json"
+host_objects = json.loads(objects_file.read_text()) if objects_file.is_file() else {}
+object_members = {}
+for name, relative in host_objects.items():
+    if (SHELL / relative).is_file():
+        object_members[name] = declared(code_only((SHELL / relative).read_text()))
+    else:
+        report.fail(objects_file, 0, f"{name}: {relative} does not exist in this Omarchy")
+
+
+gaps_file = ROOT / "test" / "host-gaps.json"
+known_gaps = json.loads(gaps_file.read_text()) if gaps_file.is_file() else {}
+seen_gaps = set()
+
+
+def known(key):
+    if key in known_gaps:
+        seen_gaps.add(key)
+        return True
+    return False
+
+
+def guarded(code, owner, member):
+    """True when the code checks for the member before it uses it."""
+    owner = re.escape(owner)
+    return bool(re.search(rf"typeof\s+(?:\w+\.)*{owner}\.{member}\b", code)
+                or re.search(rf"[\"']{member}[\"']\s+in\s+(?:\w+\.)*{owner}\b", code))
 
 for path in runtime_files(".qml"):
     source = path.read_text()
@@ -209,16 +247,39 @@ for path in runtime_files(".qml"):
                     report.fail(path, line_of(code, access.start()),
                                 f"{ident.group(1)}.{access.group(1)}: not declared here or in {host.name}")
 
-    if is_bar_widget and bar_members:
-        for match in re.finditer(r"(?<![\w])bar\.(\w+)", bare_code):
-            if match.group(1) not in bar_members:
+    for name, members in object_members.items():
+        for match in re.finditer(rf"(?<!\w){name}\.(\w+)", bare_code):
+            member = match.group(1)
+            if member not in members and not guarded(code, name, member) and not known(f"{name}.{member}"):
                 report.fail(path, line_of(code, match.start()),
-                            f"bar.{match.group(1)} does not exist in Ui/PluginBarApi.qml")
+                            f"{name}.{member} does not exist in {host_objects[name]}")
 
+# A full bar: what Omarchy's shell sets on it and reads or calls on it.
+data = manifest()
+bar_entry = data.get("entryPoints", {}).get("bar") if "bar" in data.get("kinds", []) else None
+shell_qml = SHELL / "shell.qml"
+if bar_entry and shell_qml.is_file():
+    shell_code = code_only(shell_qml.read_text())
+    configure = re.search(r"function configureBar\b", shell_code)
+    wanted = set(re.findall(r"\bshell\.bar\.(\w+)", shell_code))
+    if configure:
+        wanted |= set(re.findall(r"\"(\w+)\"\s+in\s+target", block_at(shell_code, shell_code.index("{", configure.end()))))
+    own = declared(code_only((ROOT / bar_entry).read_text()))
+    for name in sorted(wanted - own):
+        if known(f"bar.{name}"):
+            continue
+        report.fail(ROOT / bar_entry, 0, f"Omarchy's shell.qml uses bar.{name}, which this bar does not declare")
+
+# Commands: the first word of a command line, or the first item of an argument list.
+COMMAND = re.compile(r"(?:\[\s*|\brun\(\s*|\bexecDetached\(\s*)[\"'](omarchy-[a-z0-9-]+)[\"' ]|[\"'](omarchy-[a-z0-9-]+) ")
 for path in runtime_files(".qml", ".js"):
     code = code_only(path.read_text())
-    for match in re.finditer(r"[\"'\s](omarchy-[a-z0-9-]+)", code):
-        if not (omarchy / "bin" / match.group(1)).exists():
-            report.fail(path, line_of(code, match.start()), f"command {match.group(1)} is not in {omarchy}/bin")
+    for match in COMMAND.finditer(code):
+        command = match.group(1) or match.group(2)
+        if not (omarchy / "bin" / command).exists():
+            report.fail(path, line_of(code, match.start()), f"command {command} is not in {omarchy}/bin")
+
+for key in sorted(set(known_gaps) - seen_gaps):
+    report.fail(gaps_file, 0, f"{key} is no longer a gap in this Omarchy; remove it from the list")
 
 report.finish()
